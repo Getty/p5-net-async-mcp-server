@@ -27,6 +27,24 @@ Stdio transport for MCP server using newline-delimited JSON-RPC over stdin/stdou
 Each line is a JSON-RPC 2.0 message. Requests are read from stdin, responses written
 to stdout.
 
+This transport is suitable for MCP clients that communicate via standard input/output,
+such as command-line AI tools.
+
+=head1 PROTOCOL
+
+Each JSON-RPC message is a single line terminated by a newline character.
+Request format:
+
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+
+Response format:
+
+    {"jsonrpc": "2.0", "id": 1, "result": {...}}
+
+Error format:
+
+    {"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid Request"}}
+
 =cut
 
 sub new {
@@ -45,10 +63,27 @@ sub configure {
     $self->SUPER::configure(%params);
 }
 
+=method server
+
+    my $server = $transport->server;
+
+Returns the associated MCP server instance.
+
+=cut
+
 sub server {
     my ( $self ) = @_;
     return $self->{server};
 }
+
+=method handle_requests
+
+    $transport->handle_requests;
+
+Enters the main loop, reading JSON-RPC requests from stdin and writing responses
+to stdout. This method blocks until stdin is closed or an error occurs.
+
+=cut
 
 sub handle_requests {
     my ( $self ) = @_;

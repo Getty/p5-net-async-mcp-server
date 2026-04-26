@@ -43,7 +43,9 @@ sub _init {
 
 sub configure {
   my ( $self, %params ) = @_;
-  $self->SUPER::configure(%params);
+  if (exists $params{name}) {
+    $self->{name} = delete $params{name};
+  }
 }
 
 sub _add_to_loop {
@@ -122,7 +124,8 @@ Returns ArrayRef of registered tool definitions.
 
 sub register_tool {
     my ( $self, %tool ) = @_;
-    push @{ $self->{tools} } //= [], \%tool;
+    $self->{tools} //= [];
+    push @{ $self->{tools} }, \%tool;
 }
 
 =method register_tool(%tool)
@@ -144,7 +147,23 @@ Returns ArrayRef of tool definitions.
 
 async sub call_tool {
     my ( $self, $name, $arguments ) = @_;
-    die "No tool registered: $name";
+
+    my $tool = $self->_find_tool($name);
+    die "No tool registered: $name" unless $tool;
+
+    if (my $code = $tool->{code}) {
+        return $code->($arguments);
+    }
+
+    die "Tool '$name' has no implementation";
+}
+
+sub _find_tool {
+    my ( $self, $name ) = @_;
+    for my $tool (@{ $self->{tools} // [] }) {
+        return $tool if $tool->{name} eq $name;
+    }
+    return undef;
 }
 
 =method call_tool($name, $arguments)

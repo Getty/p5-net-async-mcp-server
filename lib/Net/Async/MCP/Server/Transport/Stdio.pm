@@ -9,7 +9,7 @@ use parent 'IO::Async::Notifier';
 use Future::AsyncAwait;
 use JSON::MaybeXS qw( encode_json decode_json );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 =head1 SYNOPSIS
 

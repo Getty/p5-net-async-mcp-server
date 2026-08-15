@@ -1,0 +1,163 @@
+---
+class: standard
+completed: 2026-08-15T22:41:04Z
+created: 2026-08-15T21:51:15Z
+depends_on:
+- 9
+id: 10
+priority: high
+started: 2026-08-15T22:11:05Z
+status: done
+tags:
+- transport
+- http
+- new-feature
+- sse
+title: Add Streamable HTTP transport (Transport::StreamableHTTP)
+updated: 2026-08-15T22:41:04Z
+---
+
+Add `Net::Async::MCP::Server::Transport::StreamableHTTP` — the second
+transport for the MCP 2026-07-28 architecture. The Stdio transport already
+ships; this ticket adds the HTTP/SSE half so web-reachable MCP servers
+(load balancers, gateways, browser clients) can talk to the same
+`Net::Async::MCP::Server` instance.
+
+# Why
+
+Per the 2026-07-28 spec, Streamable HTTP is the canonical transport for
+remote MCP servers. The Stdio transport is fine for local subprocess
+clients, but everything else (web UIs, hosted agents, gateway-routed
+clients) needs HTTP. The Perl `MCP::Server` ships an HTTP transport; we
+should match.
+
+# Spec reference
+
+- [Streamable HTTP, 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
+- [Custom headers from tool parameters](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#custom-headers-from-tool-parameters)
+
+# Public API
+
+```perl
+use Net::Async::MCP::Server;
+use Net::Async::MCP::Server::Transport::StreamableHTTP;
+
+my $server = Net::Async::MCP::Server->new(name => 'web-server');
+$loop->add($server);
+
+my $http = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+    server        => $server,
+    host          => '127.0.0.1',  # default; warns on non-loopback
+    port          => 8080,
+    path          => '/mcp',       # the single MCP endpoint
+    origin_allow  => [],           # empty = allow any; recommend locking down
+);
+$http->listen;
+```
+
+# Wire requirements (from spec)
+
+- Single HTTP **POST** endpoint per spec (`/mcp` by default).
+- Honor `Accept: application/json, text/event-stream` from the client.
+- Server returns either `application/json` (single object) or
+  `text/event-stream` (stream) per request.
+- Implementations MUST serve SSE for `subscriptions/listen` (long-lived
+  notification stream) and any request that opts into streaming.
+- Standard request headers (REQUIRED):
+  - `MCP-Protocol-Version` — must match `_meta.io.modelcontextprotocol/protocolVersion`.
+  - `Mcp-Method` — mirrors `method`.
+  - `Mcp-Name` — mirrors `params.name` (for `tools/call`) or `params.uri`
+    (for `resources/read`).
+- `x-mcp-header` extension: tool parameters annotated with
+  `x-mcp-header: "Foo"` arrive as `Mcp-Param-Foo: <value>` headers.
+  Base64-sentinel `=?base64?...?=` for non-ASCII values; server MUST decode
+  before comparing to body.
+- `Origin` header MUST be checked on every request; invalid → HTTP 403 with
+  JSON-RPC error of `id: null`.
+- Bind to localhost by default; warn on non-loopback bind.
+- Header validation: `MCP-Protocol-Version` != body `_meta.protocolVersion`
+  → `-32020 HeaderMismatch` with HTTP 400.
+- `Mcp-Name` / `Mcp-Param-*` decoded value must match body param value.
+- `Mcp-Method` must match `method`.
+- Notifications → HTTP 202 Accepted with no body.
+
+# Implementation choices
+
+- **HTTP server**: PSGI app via `HTTP::Server::PSGI` with `IO::Async::Loop`
+  integration. PSGI keeps the test surface small and the impl portable.
+  Alternative: `IO::Async::Stream`-based pure-Perl HTTP — port if PSGI
+  proves too heavy for the dependency budget.
+- **SSE**: implement per spec (`event:`, `data:`, blank-line terminator),
+  `X-Accel-Buffering: no`, periodic `:keepalive\r\n` comments.
+- **Per-request dispatch**: reuse `Net::Async::MCP::Server::handle()`
+  *after* header validation and `_meta` shaping. The handle() method is
+  already protocol-agnostic; only the dispatch wrapper changes.
+- **Body/header parity check**: in the transport; on mismatch, return
+  `-32020 HeaderMismatch` HTTP 400.
+
+# Subtasks
+
+1. **PSGI scaffold.** `Net::Async::MCP::Server::Transport::StreamableHTTP`
+   that takes a `server` and returns a PSGI-compatible app. The PSGI body
+   is one POST handler that decodes the JSON-RPC envelope, validates
+   headers, calls `server->handle()`, and returns the response.
+2. **HTTP server bring-up.** Sink to `HTTP::Server::PSGI` on a
+   configurable host/port. Reject non-loopback binds with a warning
+   unless explicitly enabled.
+3. **Standard header validation.** `MCP-Protocol-Version`,
+   `Mcp-Method`, `Mcp-Name` (for `tools/call`/`resources/read`/`prompts/get`).
+   Body/header parity checks. `-32020 HeaderMismatch` on failure.
+4. **Origin validation.** Configurable `origin_allow` list; reject on
+   mismatch with HTTP 403 + JSON-RPC error.
+5. **`x-mcp-header` parity.** Decode `Mcp-Param-*` headers (Base64
+   sentinel handling), compare to body. Reject on mismatch with
+   `-32020 HeaderMismatch`.
+6. **SSE response mode.** Honor `Accept: text/event-stream`; emit
+   `event:`, `data:`, blank-line terminator; `X-Accel-Buffering: no`;
+   SSE comment keepalive every 15s on long-lived streams.
+7. **`subscriptions/listen` support.** Long-lived SSE stream that
+   delivers filter-allowed change notifications. Stub for now; wire
+   parity with the spec is the goal.
+8. **Notifications.** JSON-RPC notifications (no `id`) → HTTP 202
+   Accepted with no body.
+9. **Tests.** `t/03-streamable-http.t`:
+   - valid POST / `application/json` response
+   - valid POST / `text/event-stream` response
+   - `MCP-Protocol-Version` mismatch → 400 `-32020`
+   - `Mcp-Method` mismatch → 400 `-32020`
+   - `Mcp-Name` mismatch → 400 `-32020`
+   - `Origin` block → 403
+   - `x-mcp-header` parity
+   - notification body → 202
+   - plain HTTP GET on the endpoint → 405 (per spec)
+   - `Accept` enforcement
+   - SSE stream lifecycle for `subscriptions/listen`
+10. **POD.** Full `[@Author::GETTY]` POD: `=method`s for `listen`, `port`,
+    `host`, `path`, `server`; `=attr`s for the same; security section
+    pointing at the spec.
+
+# Dependencies
+
+Add to `cpanfile` runtime:
+- `HTTP::Server::PSGI`
+
+Add to `cpanfile` on test:
+- `Plack` (for `Plack::Test`)
+- `HTTP::Request::Common` (for building test requests)
+- `LWP::UserAgent` (or `HTTP::Tiny`)
+
+# Out of scope
+
+- TLS — operator terminates via reverse proxy.
+- OAuth / Dynamic Client Registration — spec mandates for HTTP; punt to
+  a follow-up ticket.
+- `HTTP+SSE` (2024-11-05) backwards compatibility — deprecated, skip.
+
+# Definition of done
+
+- New module with full POD.
+- `t/03-streamable-http.t` covers the wire protocol.
+- `cpanfile` updated.
+- `README.md` mentions the new transport.
+- `dzil build` succeeds.
+- `prove -l t/` passes.

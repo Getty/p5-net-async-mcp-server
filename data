@@ -1,0 +1,68 @@
+---
+claimed_at: 2026-08-15T22:47:29Z
+claimed_by: claude
+class: standard
+completed: 2026-08-15T22:47:29Z
+created: 2026-08-15T21:52:38Z
+depends_on:
+- 9
+- 10
+id: 11
+priority: medium
+started: 2026-08-15T22:43:18Z
+status: done
+tags:
+- docs
+- readme
+- pod
+- changes
+title: Refresh docs (README + POD + Changes) for 2026-07-28 + HTTP
+updated: 2026-08-15T22:47:29Z
+---
+
+Refresh `README.md` and POD across the distribution to match the 2026-07-28
+architecture and the new Streamable HTTP transport. The previous README
+already drifts (says version 0.001 while the code is at 0.002 per karr #8);
+this ticket folds that fix in.
+
+# Scope
+
+- `README.md` — version bump, protocol section, transports section,
+  examples for both Stdio and HTTP transports.
+- `lib/Net/Async/MCP/Server.pm` — POD: drop `initialize`/`ping` docs, add
+  per-request `_meta` handling, `server/discover`, MRTR, new error codes.
+  Use `[@Author::GETTY]` PodWeaver conventions: inline `=method`, `=attr`,
+  `=seealso`; no manual `NAME`/`VERSION`/`AUTHOR` blocks.
+- `lib/Net/Async/MCP/Server/Transport/Stdio.pm` — POD: document the new
+  per-request semantics (no handshake, no session).
+- `lib/Net/Async/MCP/Server/Transport/StreamableHTTP.pm` — full POD per
+  PodWeaver conventions (delivered with the HTTP transport ticket; this
+  ticket only syncs cross-references).
+- `Changes` — 0.002 entry covering the breaking changes.
+- `cpanfile` — document new dependencies.
+
+# Plan
+
+1. **Sync version** in `README.md` (0.001 → 0.002). Closes karr #8.
+2. **Protocol section** — drop `initialize`/`ping` from the supported
+   method list. Add `server/discover`. Mention `_meta` per-request
+   metadata and `resultType` on every result.
+3. **Transports section** — Stdio (per-request, stateless) + HTTP
+   (Streamable HTTP, POST single endpoint, SSE for streams).
+4. **Server POD** — replace docs for `initialize`/`ping` with `server/discover`
+   and per-request `_meta` block. Add an `errors` section listing the new
+   `-32020`, `-32021`, `-32022` codes.
+5. **Stdio POD** — document the new per-request semantics (one line per
+   request, no handshake, EOF = shutdown).
+6. **Changes** — 0.002 entry listing the breaking changes per the migration
+   ticket. Reference the migration and HTTP tickets.
+7. **cpanfile** — no manual edits; deps handed off by the HTTP ticket.
+
+# Definition of done
+
+- `README.md` matches the actual code path (no version drift, no references
+  to removed methods).
+- `dzil build` generates a clean README from POD.
+- All POD sections compile without warnings (`podchecker` clean).
+- `Changes` reflects the breaking-change note.
+- `prove -l t/` passes — no test should rely on stale doc examples.

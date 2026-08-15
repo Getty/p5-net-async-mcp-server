@@ -69,6 +69,8 @@ Thumbs.db
 !.claude/agents/**
 !.claude/skills/
 !.claude/skills/**
+!.claude/rules/
+!.claude/rules/**
 !.claude/hooks/
 !.claude/hooks/**
 
@@ -81,3 +83,7 @@ Thumbs.db
 .claude/statsig/
 .claude/todos/
 .claude/projects/
+
+# karr materialized task view -- never commit
+tasks/
+config.yml

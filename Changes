@@ -2,6 +2,51 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - Breaking protocol migration to MCP 2026-07-28 (stateless, _meta-based).
+  - Drop the initialize handshake: initialize, notifications/initialized and
+    ping are no longer recognised (each returns -32601 Method not found).
+  - Every request must carry _meta.io.modelcontextprotocol/protocolVersion
+    and _meta.io.modelcontextprotocol/clientCapabilities; missing fields
+    return -32602, an unsupported version returns -32022 with the server's
+    supported list in data.supported.
+  - Every successful result carries resultType and an
+    _meta.io.modelcontextprotocol/serverInfo entry (injected by
+    _jsonrpc_response, not by callers).
+  - Add server/discover RPC — the new pre-flight RPC; clients can probe with
+    it to learn the server's supported versions, capabilities and identity
+    without any prior handshake.
+  - tools/list returns the new wire shape: resultType "complete", tools
+    using inputSchema (camelCase), and ttlMs / cacheScope caching hints.
+  - tools/call wraps a tool's plain return value in a text content block;
+    tool execution errors become isError: true results (the model can
+    self-correct) while protocol-level errors (unknown tool) return a
+    JSON-RPC -32602.
+  - MRTR-ready call_tool: a tool that returns a hashref with
+    resultType "input_required" and inputRequests / requestState is passed
+    through unchanged, so multi round-trip requests work without further
+    changes when a tool needs them.
+  - Server::configure now calls SUPER::configure, so unknown parameters
+    surface through IO::Async::Notifier instead of being silently dropped.
+  - register_tool now requires an inputSchema; the legacy input_schema key
+    is accepted and normalised at registration time.
+  - New error codes -32020 (HeaderMismatch), -32021
+    (MissingRequiredClientCapability) and -32022 (UnsupportedProtocolVersion)
+    are wired into _jsonrpc_error (HeaderMismatch is reserved for the HTTP
+    transport; the others are reachable from handle()).
+  - No backwards-compatibility fallback for 2025-11-25 clients; dual-era
+    support is a future ticket.
+  - Stdio transport: unchanged behaviourally (already a stateless line loop
+    with EOF-as-graceful-shutdown), but documented to match the spec.
+  - Streamable HTTP transport for MCP 2026-07-28: new
+    Net::Async::MCP::Server::Transport::StreamableHTTP module exposes a
+    single HTTP POST endpoint (default /mcp), validates the spec's
+    request-metadata headers (MCP-Protocol-Version, Mcp-Method, Mcp-Name,
+    Mcp-Param-{Name}) against the JSON-RPC body, and answers each request
+    as application/json or text/event-stream. Notifications return 202
+    Accepted; header/body divergences return JSON-RPC -32020 HeaderMismatch.
+    subscriptions/listen keeps the stream open with periodic :keepalive
+    comments. New runtime dep on Plack; new test file t/03-streamable-http.t.
+
 0.001     2026-04-26 03:50:13Z
 
   - Initial release

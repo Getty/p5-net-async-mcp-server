@@ -24,8 +24,11 @@ our $VERSION = '0.002';
 
 Stdio transport for MCP server using newline-delimited JSON-RPC over stdin/stdout.
 
-Each line is a JSON-RPC 2.0 message. Requests are read from stdin, responses written
-to stdout.
+Each line is a JSON-RPC 2.0 message. Requests and notifications are read from
+stdin, responses written to stdout. The transport is stateless — there is no
+session, no handshake, and no shared state between requests. The protocol
+version, client capabilities, and identity are carried inline in each
+request's C<_meta> field (see L<Net::Async::MCP::Server>).
 
 This transport is suitable for MCP clients that communicate via standard input/output,
 such as command-line AI tools.
@@ -35,7 +38,7 @@ such as command-line AI tools.
 Each JSON-RPC message is a single line terminated by a newline character.
 Request format:
 
-    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+    {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}}}
 
 Response format:
 
@@ -43,7 +46,10 @@ Response format:
 
 Error format:
 
-    {"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid Request"}}
+    {"jsonrpc": "2.0", "id": 1, "error": {"code": -32022, "message": "Unsupported protocol version", "data": {"supported": ["2026-07-28"]}}}
+
+Notifications from the client are accepted and discarded (C<handle()> returns
+C<undef>, nothing is written to stdout).
 
 =cut
 
@@ -81,7 +87,9 @@ sub server {
     $transport->handle_requests;
 
 Enters the main loop, reading JSON-RPC requests from stdin and writing responses
-to stdout. This method blocks until stdin is closed or an error occurs.
+to stdout. This method blocks until stdin is closed (EOF), which is the spec's
+graceful-shutdown signal. Per MCP 2026-07-28 the transport is stateless: each
+line is an independent request and the server carries no session across calls.
 
 =cut
 

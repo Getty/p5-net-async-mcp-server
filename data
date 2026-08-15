@@ -1,0 +1,152 @@
+---
+claimed_at: 2026-08-15T22:08:59Z
+claimed_by: claude
+class: standard
+completed: 2026-08-15T22:08:59Z
+created: 2026-08-15T21:50:54Z
+id: 9
+priority: high
+started: 2026-08-15T21:56:31Z
+status: done
+tags:
+- migration
+- protocol
+- breaking-change
+- mcp-2026-07-28
+title: Migrate to MCP protocol 2026-07-28 (stateless, _meta-based, MRTR)
+updated: 2026-08-15T22:08:59Z
+---
+
+Migrate `Net::Async::MCP::Server` from MCP 2025-11-25 to **2026-07-28** (the
+spec revision that ships with the Perl `MCP` distribution 0.15). 2026-07-28
+is a **breaking change release** — the protocol becomes fully stateless, the
+`initialize` handshake is removed, and every request carries `protocolVersion`
+and `clientCapabilities` in `_meta`.
+
+# Why
+
+The Perl `MCP` distribution 0.15 (released 2026-07-30) aligns with the
+2026-07-28 spec, which deprecates the session-based protocol we currently
+implement. Without this migration, every wire payload we accept from a
+2026-07-28 client is silently wrong; the cpanfile bump alone is not
+sufficient — the protocol interpretation must follow.
+
+# Spec references
+
+- [2026-07-28 spec root](https://modelcontextprotocol.io/specification/2026-07-28)
+- [Changelog 2025-11-25 → 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [Base protocol overview](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)
+- [Stdio transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
+
+# Goal
+
+1. Protocol version string → `2026-07-28`.
+2. Every request parsed for `_meta` with `io.modelcontextprotocol/*` keys.
+3. Every result carries `resultType` (and `io.modelcontextprotocol/serverInfo` in `_meta`).
+4. `tools/list` results carry `ttlMs` and `cacheScope`.
+5. `tools/call` results wrapped in MCP content blocks.
+6. `initialize`, `notifications/initialized`, `ping`, `logging/setLevel`,
+   `notifications/roots/list_changed` removed.
+7. `server/discover` RPC added.
+8. New error codes: `-32020 HeaderMismatch`, `-32021 MissingRequiredClientCapability`,
+   `-32022 UnsupportedProtocolVersion`.
+9. MRTR (Multi Round-Trip Requests) shape: `InputRequiredResult` with
+   `resultType: "input_required"` and `inputRequests`.
+10. Stdio transport is stateless: one line per request, no session, no handshake.
+    EOF on stdin = graceful shutdown.
+11. `server/discover` is the new pre-flight RPC; clients may call it
+    before any other request for up-front version selection.
+
+# Subtasks
+
+1. **Drop the initialize handshake.** Remove `initialize`,
+   `notifications/initialized`, `ping` handling. The discovery step becomes
+   `server/discover`. (`handle()` rejects `initialize` with `-32601` going
+   forward; do not silently no-op.)
+2. **Per-request `_meta` parsing.** New top-of-`handle()` block extracts
+   `io.modelcontextprotocol/protocolVersion`, `/clientInfo`, `/clientCapabilities`,
+   `/logLevel`. The protocol version is required; missing → `-32602 Invalid params`.
+   Unsupported version → `-32022 UnsupportedProtocolVersion` with `supported: [...]`
+   payload. Missing required capability → `-32021 MissingRequiredClientCapability`.
+3. **Per-result `_meta` injection.** Every successful result includes
+   `resultType: "complete"` and `io.modelcontextprotocol/serverInfo` in `_meta`.
+   The `_meta` injection is part of `_jsonrpc_response`, not the caller.
+4. **`server/discover` RPC.** Returns
+   `{ supportedVersions: ["2026-07-28"], capabilities, serverInfo, extensions }`.
+   Available before any other request — useful for stdio as a backward-compat
+   probe, and for HTTP as a pre-flight.
+5. **`tools/list` result shape.**
+   `{ tools: [...], resultType: "complete", ttlMs, cacheScope, _meta: { ... } }`.
+   Each tool definition uses `inputSchema` (camelCase) — karr #3.
+6. **`tools/call` content blocks.** Wrap success return in
+   `{ content: [{ type: "text", text: ... }], resultType: "complete" }`.
+   Tool errors → JSON-RPC error with `-32602 Invalid params` (legacy `-32002`
+   still accepted on input).
+7. **MRTR-ready `call_tool`.** When a tool needs more input, return
+   `InputRequiredResult` with `resultType: "input_required"` and
+   `inputRequests`. Stub for now; wire parity is the goal.
+8. **New error codes.** Add `-32020 HeaderMismatch`, `-32021 MissingRequiredClientCapability`,
+   `-32022 UnsupportedProtocolVersion` to `_jsonrpc_error`. Drop the `ping` path.
+9. **Stdio transport.** One line per request, no session, no handshake.
+   `handle_requests` exits on EOF. Blocking IO is acceptable per spec.
+10. **Configure / constructor.** Apply karr #6 — `configure` should accept
+    (or at least surface) unknown params, not silently drop them. Keep the
+    `name` shortcut. Validate `inputSchema` keys exist on the tool definition.
+11. **Tests.** Update `t/01-basic.t` and add `t/02-protocol-2026-07-28.t`
+    covering:
+      - `_meta` parsing (valid, missing required keys, wrong version)
+      - `server/discover`
+      - `tools/list` shape (`resultType`, `ttlMs`, `cacheScope`)
+      - `tools/call` content blocks
+      - MRTR `input_required` shape
+      - error codes (-32020, -32021, -32022, -32602)
+      - notification POST returns 202 (HTTP) / no-op (stdio)
+      - initialize is rejected with `-32601`
+      - ping is rejected with `-32601`
+
+# Folds in existing tickets
+
+- #1 Stdio blocks loop — partially addressed by subtask 9 (stateless, ephemeral).
+  Native `IO::Async::Stream` integration is a stretch goal within this ticket.
+- #2 Tool errors → JSON-RPC errors — addressed in subtask 6.
+- #3 input_schema → inputSchema — addressed in subtask 5.
+- #4 tools/call content blocks — addressed in subtask 6.
+- #5 initialize protocolVersion — addressed in subtask 1 (initialize is removed).
+- #6 configure unknown params — addressed in subtask 10.
+- #7 handle() unused context — replaced by the per-request `_meta` block in subtask 2.
+- #8 README drift — fold into the documentation ticket; do not duplicate here.
+
+# Out of scope
+
+- Streamable HTTP transport (separate ticket).
+- Tasks extension (`io.modelcontextprotocol/tasks`).
+- Logging (deprecated; server logs to stderr).
+- Roots / Sampling (deprecated in 2026-07-28).
+- Multi-server `extensions` capability negotiation.
+- Backwards-compatibility fallback for 2025-11-25 clients. Decision: **not
+  supported** in 0.002. Add a `Changes` note. A future ticket can add
+  era-detection if needed.
+
+# Definition of done
+
+- All existing tests adapted to the new protocol.
+- New `t/02-protocol-2026-07-28.t` covers the wire format end-to-end.
+- `prove -l t/` passes.
+- `dzil build` succeeds.
+- `Changes` has a 0.002 entry with the breaking-change note.
+- `dist.ini` still uses `[@Author::GETTY]`; no new bundle plugins needed.
+- `cpanfile` updated for any new runtime deps (none expected, since the
+  migration is architecture-only).
+## Done (2026-08-16)
+
+All 11 subtasks landed. Files: lib/Net/Async/MCP/Server.pm, lib/Net/Async/MCP/Server/Transport/Stdio.pm, t/01-basic.t, t/02-protocol-2026-07-28.t (new), Changes.
+
+Verify: prove -l t/ (30 tests, all pass) and dzil test (32 tests including author/release, all pass or skipped-as-release-only). dzil build succeeded.
+
+Spec choices made:
+- ttlMs default: 300000 (5 min) on tools/list and server/discover, matching the spec example.
+- cacheScope default: 'public' on tools/list and server/discover (tools are typically identical across users).
+- input_schema is still accepted at register_tool() and normalised to inputSchema, so callers migrating incrementally don't break.
+- Tool execution errors become isError: true content blocks (model-recoverable, per spec); unknown-tool errors stay as -32602 JSON-RPC errors.
+
+Folded: #1 (partial via statelessness), #2, #3, #4, #5, #6, #7. Untouched: #8 (karr #11), #10 (HTTP), #11.

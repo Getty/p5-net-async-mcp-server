@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:37Z
+id: 6
+priority: medium
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- api
+title: Server::configure drops unknown parameters silently
+updated: 2026-08-16T00:03:28Z
+---
+
+Net::Async::MCP::Server::configure consumes only `name` and never calls SUPER::configure, so every other parameter vanishes instead of reaching IO::Async::Notifier (which would normally croak on an unrecognised one). Transport::Stdio::configure does delegate correctly - use it as the pattern.
+Folded into #9 (MCP 2026-07-28 migration): subtask 10 makes configure accept unknown params.
+Erledigt durch 81194a7: configure delegiert wieder an SUPER::configure(%params), Server.pm:70 - unbekannte Parameter erreichen IO::Async::Notifier und croaken dort.

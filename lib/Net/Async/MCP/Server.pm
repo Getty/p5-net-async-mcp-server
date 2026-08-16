@@ -196,7 +196,7 @@ C<input_schema>).
 =cut
 
 async sub call_tool {
-    my ( $self, $name, $arguments, $context ) = @_;
+    my ( $self, $name, $arguments ) = @_;
 
     my $tool = $self->_find_tool($name);
     die "No tool registered: $name" unless $tool;
@@ -216,7 +216,7 @@ sub _find_tool {
     return undef;
 }
 
-=method call_tool($name, $arguments, $context)
+=method call_tool($name, $arguments)
 
 Called when a client invokes a tool. Subclasses should override to provide
 tool implementations. The return value is wrapped by the dispatch layer:
@@ -247,7 +247,7 @@ shaped like:
 =cut
 
 sub handle {
-    my ( $self, $request, $context ) = @_;
+    my ( $self, $request ) = @_;
 
     return _jsonrpc_error( -32700, 'Invalid JSON-RPC request' )
         unless ref $request eq 'HASH';

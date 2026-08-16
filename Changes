@@ -29,6 +29,10 @@ Revision history for Net-Async-MCP-Server
     surface through IO::Async::Notifier instead of being silently dropped.
   - register_tool now requires an inputSchema; the legacy input_schema key
     is accepted and normalised at registration time.
+  - Drop the unused $context parameter from handle($request) and
+    call_tool($name, $arguments). Under the stateless 2026-07-28 protocol
+    per-request state arrives in the request's _meta block, which handle()
+    validates itself; no caller ever passed a third argument.
   - New error codes -32020 (HeaderMismatch), -32021
     (MissingRequiredClientCapability) and -32022 (UnsupportedProtocolVersion)
     are wired into _jsonrpc_error (HeaderMismatch is reserved for the HTTP

@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-08-16T16:41:45Z
+claimed_by: mcp-server-pod-writer
+class: standard
+completed: 2026-08-16T16:41:45Z
+created: 2026-08-16T16:19:21Z
+id: 16
+priority: medium
+started: 2026-08-16T16:23:23Z
+status: done
+tags:
+- docs
+title: README.md Stdio section describes the removed blocking readline loop
+updated: 2026-08-16T16:41:45Z
+---
+
+Follow-up to #1. README.md is hand-maintained (include_readme is off), so the POD change did not touch it.
+
+The "Net::Async::MCP::Server::Transport::Stdio" section still says handle_requests blocks reading STDIN line by line until EOF. After #1 it still blocks the caller until EOF, but it reads through an IO::Async::Stream registered in the loop, so other notifiers keep running. The sentence should say that.
+
+The section should also mention the two new public accessors, read_handle and write_handle (defaulting to STDIN and STDOUT), which are documented in POD but nowhere in README.
+
+README.md also still declares version 0.001 while lib/ is at 0.002 - separate pre-existing drift, worth folding into the same pass.

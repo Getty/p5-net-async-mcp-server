@@ -52,8 +52,8 @@ request must carry two keys in `params._meta`:
   client speaks. Missing returns JSON-RPC `-32602`; unsupported returns
   `-32022` with the server's `supported` list in `data`.
 - `io.modelcontextprotocol/clientCapabilities` — the client's capabilities
-  object. Missing returns `-32602`; any required capability that is not
-  present returns `-32021`.
+  object. Only presence of the key is checked, not its contents — missing
+  the key returns `-32602`.
 
 The methods this server implements:
 
@@ -84,9 +84,8 @@ layer; callers do not have to add it themselves.
 - `-32602 Invalid params` — missing or malformed `_meta`, or `tools/call`
   with an unknown tool name.
 - `-32020 HeaderMismatch` — Streamable HTTP only: an MCP request-metadata
-  header disagrees with the matching field in the JSON-RPC body.
-- `-32021 MissingRequiredClientCapability` — the client did not declare a
-  capability the server requires.
+  header disagrees with the matching field in the JSON-RPC body. Not
+  raised by `Net::Async::MCP::Server::handle` itself.
 - `-32022 UnsupportedProtocolVersion` — the request's
   `io.modelcontextprotocol/protocolVersion` is not in this server's
   `supportedVersions`; the error `data` lists the supported ones.
@@ -191,6 +190,43 @@ Returns a `Future` that resolves to one of:
 - an exception — the dispatch layer catches it and surfaces it as an
   `isError: true` content block (recoverable), not a JSON-RPC error
   (which would abort the call).
+
+## handle
+
+    my $response = $server->handle($request);
+
+The JSON-RPC dispatch entry point. `$request` is a single decoded
+JSON-RPC request or notification hashref (`jsonrpc`, `method`, and
+optionally `id` and `params`); transports decode wire JSON before calling
+this and encode whatever it returns.
+
+`handle` is synchronous, not a `Future`-returning method: it calls
+`->get` internally on the `Future`s from `discover`, `list_tools` and
+`call_tool` and hands back a plain result.
+
+If `$request` has a defined `id` key (`0` or `''` counts; only an absent
+key or a JSON `null` id does not), `handle` returns a JSON-RPC response or
+error hashref. Otherwise `$request` is treated as a notification: `_meta`
+is never validated, nothing is dispatched, and `handle` returns `undef`
+(the Stdio transport writes nothing back for `undef`).
+
+Malformed input is rejected before any of that, regardless of `id`: a
+`$request` that is not a hashref returns `-32700`; a hashref with no
+defined `method` returns `-32600`.
+
+For every request that does carry an `id`, the per-request `_meta`
+contract described above is validated before dispatch, then `method` is
+mapped to `server/discover` → `discover`, `tools/list` → `list_tools`, or
+`tools/call` → `call_tool` (unregistered tool name: `-32602`). Any other
+method — including the previous revision's `initialize`, `ping` and
+`notifications/initialized` — returns `-32601`, but only when sent with
+an `id`; the same method names sent as notifications (no `id`) are
+silently no-op'd like any other notification and never reach the dispatch
+or the `-32601` check.
+
+The full set of JSON-RPC error codes `handle` itself can produce:
+`-32700`, `-32600`, `-32601`, `-32602`, `-32022`. `-32020` is raised by
+`Net::Async::MCP::Server::Transport::StreamableHTTP`, not by `handle`.
 
 # TRANSPORTS
 

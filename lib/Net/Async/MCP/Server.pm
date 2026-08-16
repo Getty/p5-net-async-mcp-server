@@ -284,6 +284,89 @@ sub handle {
     return undef;
 }
 
+=method handle($request)
+
+The JSON-RPC dispatch entry point. C<$request> is a single decoded
+JSON-RPC request or notification hashref (C<jsonrpc>, C<method>, and
+optionally C<id> and C<params>); transports are responsible for decoding
+wire JSON before calling this and for encoding whatever it returns.
+
+Despite dispatching to the C<async sub> methods C<discover>, C<list_tools>
+and C<call_tool>, C<handle> itself is synchronous: it calls C<-E<gt>get>
+on the C<Future> each of those returns and hands back a plain result,
+never a C<Future>.
+
+If C<$request> has a defined C<id> key (C<0> or C<''> counts; only an
+absent key or a JSON C<null> id does not), C<handle> returns a JSON-RPC
+response or error hashref, e.g.:
+
+    { jsonrpc => '2.0', id => 1, result => { ... } }
+    { jsonrpc => '2.0', id => 1, error  => { code => -32602, message => '...' } }
+
+Otherwise C<$request> is treated as a notification: C<_meta> is never
+validated, nothing is dispatched, and C<handle> returns C<undef>
+(transports skip writing a response when they get C<undef> back).
+
+Malformed input is rejected before any of that, regardless of C<id>: a
+C<$request> that is not a hashref returns C<-32700>; a hashref with no
+defined C<method> returns C<-32600>.
+
+For every request that does carry an C<id>, the per-request C<_meta>
+contract, read from C<params._meta>, is validated before dispatch:
+
+=over
+
+=item *
+
+C<io.modelcontextprotocol/protocolVersion> must be a defined, non-empty
+string listed in C<supported_versions>. Missing or empty returns
+C<-32602>; present but unsupported returns C<-32022>, with the server's
+supported list and the requested version in the error's C<data>.
+
+=item *
+
+C<io.modelcontextprotocol/clientCapabilities> must be present as a key in
+C<_meta> — its value is not otherwise inspected, so C<undef>/JSON C<null>
+satisfies the check. Missing the key returns C<-32602>.
+
+=back
+
+Once C<_meta> validates, C<method> is mapped as:
+
+=over
+
+=item *
+
+C<server/discover> dispatches to C<discover>.
+
+=item *
+
+C<tools/list> dispatches to C<list_tools>.
+
+=item *
+
+C<tools/call> looks up C<params.name> in the tool registry (unregistered
+name: C<-32602>) and dispatches to C<call_tool> with C<params.arguments>;
+see the C<call_tool> method above for how a tool's return value or
+exception becomes the result.
+
+=item *
+
+Anything else returns C<-32601>, including legacy handshake method names
+such as C<initialize>, C<ping> or C<notifications/initialized> when sent
+with an C<id>. The same names sent as notifications (no C<id>) never
+reach this dispatch — they fall into the no-op/C<undef> path above like
+any other notification, regardless of C<method>.
+
+=back
+
+The full set of JSON-RPC error codes C<handle> itself can produce:
+C<-32700>, C<-32600>, C<-32601>, C<-32602>, C<-32022>. C<-32020>
+(header/body mismatch) is raised by
+L<Net::Async::MCP::Server::Transport::StreamableHTTP>, not by C<handle>.
+
+=cut
+
 sub _validate_request_meta {
     my ( $self, $request ) = @_;
     my $id     = $request->{id};

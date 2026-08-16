@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-08-16T16:41:19Z
+claimed_by: mcp-server-worker
+class: standard
+completed: 2026-08-16T16:41:19Z
+created: 2026-08-15T16:28:57Z
+id: 1
+priority: high
+started: 2026-08-16T16:04:26Z
+status: done
+tags:
+- transport
+- async
+title: Stdio transport blocks the event loop
+updated: 2026-08-16T16:41:19Z
+---
+
+handle_requests() reads STDIN in a blocking `while (my $line = <STDIN>)` loop and the $loop it fetches is assigned but never used. Despite the IO::Async::Notifier base, nothing runs in the event loop. Real async operation needs an IO::Async::Stream on STDIN with a line-oriented on_read. Design decision needed before implementing: does handle_requests keep its blocking signature as a convenience wrapper, or is it replaced?
+Folded into #9 (MCP 2026-07-28 migration): subtask 9 addresses stateless stdio. Native IO::Async::Stream binding stays a stretch goal inside #9.
+Implemented: IO::Async::Stream on the read handle, registered as a child of the transport; handle_requests waits on an EOF Future via ->get, which runs the loop, so other notifiers keep running. Public signature unchanged, still blocks the caller until EOF.
+
+New public config/accessors: read_handle / write_handle, defaulting to STDIN / STDOUT. Needed for testability - the house rule forbids spawning a process, and redirecting the real STDIN/STDOUT would fight with TAP output. Documented as =method in the house format.
+
+All preserved behaviours verified by t/04-stdio-transport.t: empty lines skipped, invalid JSON gives -32700 with null id and the loop carries on, undef from handle() writes nothing, EOF returns, one encoded response per line. Also preserved: a final line with no trailing newline is still dispatched, as the readline loop did.
+
+Regression proof: subtest 1 feeds requests from an IO::Async::Timer::Countdown in the same loop and snapshots the response sink at each expiry. Checked against a hybrid build (new handle params, old blocking readline loop) - it hangs until timeout, because the timer never fires. Full suite and dzil test green.
+
+Drift raised instead of fixed: #15 (write side is block-buffered and synchronous), #16 (README), #17 (StreamableHTTP listen). Not touched: Changes, Server.pm.

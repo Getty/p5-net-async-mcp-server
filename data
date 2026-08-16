@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-08-16T16:40:38Z
+claimed_by: mcp-server-worker
+class: standard
+completed: 2026-08-16T16:40:38Z
+created: 2026-08-16T00:16:55Z
+id: 13
+priority: low
+started: 2026-08-16T16:04:32Z
+status: done
+tags:
+- cleanup
+title: '_init and _add_to_loop are pure SUPER:: boilerplate'
+updated: 2026-08-16T16:40:38Z
+---
+
+Server.pm: sub _init (lines 60-63) and sub _add_to_loop (lines 73-76) do nothing but call their SUPER:: counterpart and return. They add no behaviour over inheriting from IO::Async::Notifier directly.
+
+Not a bug - correct, just redundant. Decide whether to drop them or keep them as documented extension points. Note that configure() (line 65) deliberately does have a body (it consumes "name" before delegating), so it is not part of this.
+
+Pre-existing, not a regression. Spotted while fixing #7 (604d43d).

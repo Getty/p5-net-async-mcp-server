@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:03Z
+id: 2
+priority: high
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- protocol
+- errors
+title: Tool errors escape handle() as exceptions instead of JSON-RPC errors
+updated: 2026-08-16T00:03:28Z
+---
+
+call_tool() dies for an unknown tool or a tool without an implementation. _handle_tools_call calls ->get on it, so the exception propagates out of handle() and kills the caller instead of producing a JSON-RPC error response (-32602 / -32603). Same class of problem for any async sub in the dispatch path.
+Folded into #9 (MCP 2026-07-28 migration): subtask 6 maps tool errors to JSON-RPC errors.
+Erledigt durch 81194a7 (Migration 2026-07-28): handle() mappt Tool-Fehler auf isError-Content-Block, Server.pm:373-380.

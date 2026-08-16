@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-08-16T16:40:48Z
+claimed_by: main
+class: standard
+completed: 2026-08-16T16:40:48Z
+created: 2026-08-16T00:47:01Z
+id: 14
+priority: medium
+started: 2026-08-16T16:04:38Z
+status: done
+tags:
+- protocol
+- docs
+title: Changes claims -32021 MissingRequiredClientCapability, which does not exist
+updated: 2026-08-16T16:40:48Z
+---
+
+Changes:36 states under {{$NEXT}} that "New error codes -32020 (HeaderMismatch), -32021 (MissingRequiredClientCapability) and -32022 (UnsupportedProtocolVersion) are wired into _jsonrpc_error". Verified: -32021 appears nowhere in lib/ or t/ - zero hits. -32020 and -32022 do exist.
+
+handle() checks io.modelcontextprotocol/clientCapabilities for key presence only (exists, not shape or contents), so there is no per-capability requirement that could raise -32021.
+
+Two possible resolutions, needs a call:
+a) The feature was intended but never landed - implement a required-capability check that raises -32021, per MCP 2026-07-28.
+b) It was dropped deliberately - then the Changes line must be corrected before release, because it goes out as release notes claiming an error code consumers can handle.
+
+The two matching README claims were already corrected in 23708ff. Changes was left untouched on purpose: rewriting a changelog entry is a maintainer call, not a doc cleanup.

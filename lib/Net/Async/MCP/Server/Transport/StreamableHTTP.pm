@@ -227,9 +227,11 @@ sub to_app {
     $http->listen;
 
 Binds on the configured C<host:port> using L<HTTP::Server::PSGI> and starts
-accepting requests. Blocks the caller — same caveat as
-L<Net::Async::MCP::Server::Transport::Stdio/handle_requests>: the event loop is
-not yet wired into the accept loop. A real async bring-up is a future ticket.
+accepting requests. Blocks the caller and the event loop with it: the loop is
+not yet wired into the accept loop. Unlike
+L<Net::Async::MCP::Server::Transport::Stdio/handle_requests>, which reads
+through the loop and leaves other notifiers running, nothing else in the loop
+gets a turn here. A real async bring-up is a future ticket.
 
 A non-loopback bind is warned about, since exposing an MCP server on a public
 interface is almost always accidental and unauthenticated; pass

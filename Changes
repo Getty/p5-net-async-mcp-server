@@ -39,8 +39,22 @@ Revision history for Net-Async-MCP-Server
     handle()).
   - No backwards-compatibility fallback for 2025-11-25 clients; dual-era
     support is a future ticket.
-  - Stdio transport: unchanged behaviourally (already a stateless line loop
-    with EOF-as-graceful-shutdown), but documented to match the spec.
+  - Stdio transport: handle_requests no longer reads through <STDIN>. It
+    reads via an IO::Async::Stream registered as a child of the transport and
+    waits on an EOF Future, so the caller still blocks until EOF while every
+    other notifier in the same loop keeps running. If the transport is not in
+    a loop yet, one is created and the transport added to it.
+  - Stdio transport: new read_handle / write_handle parameters and accessors,
+    defaulting to \*STDIN / \*STDOUT, so the transport can be driven from a
+    pipe. Line handling is unchanged — empty lines skipped, invalid JSON
+    answered with -32700, notifications write nothing, a final line without a
+    trailing newline is still dispatched, EOF is the graceful-shutdown signal
+    and the read handle is left open.
+  - Stdio transport: handle_requests switches autoflush on for the write
+    handle, once on entry. Without it a finished response could sit in Perl's
+    block buffer while the client waited for it and the transport waited for
+    the next request — a deadlock that only broke once 4-8K had piled up or
+    the process exited. The write itself is still a blocking print.
   - Streamable HTTP transport for MCP 2026-07-28: new
     Net::Async::MCP::Server::Transport::StreamableHTTP module exposes a
     single HTTP POST endpoint (default /mcp), validates the spec's

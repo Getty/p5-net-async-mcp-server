@@ -247,8 +247,14 @@ like:
 
     {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}}}
 
-`handle_requests` blocks reading `<STDIN>` line by line until EOF, which
-is the spec's graceful-shutdown signal. See
+`handle_requests` reads through an `IO::Async::Stream` registered as a
+child of the transport and waits on a `Future` for EOF, the spec's
+graceful-shutdown signal. It blocks the caller, but not the event loop:
+other notifiers in the same loop — timers, other transports — keep
+running while requests are being read. If the transport isn't a member of
+a loop yet, one is created and the transport added to it. Requests are
+read from `read_handle` and responses written to `write_handle`,
+defaulting to `\*STDIN` and `\*STDOUT`. See
 [Net::Async::MCP::Server::Transport::Stdio](https://metacpan.org/pod/Net::Async::MCP::Server::Transport::Stdio).
 
 ## Net::Async::MCP::Server::Transport::StreamableHTTP

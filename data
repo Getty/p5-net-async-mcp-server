@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:31Z
+id: 5
+priority: medium
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- protocol
+title: initialize ignores the client protocolVersion
+updated: 2026-08-16T00:03:28Z
+---
+
+initialize() hardcodes protocolVersion => "2025-11-25" and never looks at the version the client offers in params. No negotiation, no mismatch error. Decide the policy: echo the client version when supported, otherwise return the newest supported one (that is what the spec asks for) or a JSON-RPC error.
+Superseded by #9 (MCP 2026-07-28 migration): initialize is removed in 2026-07-28; protocolVersion now travels in _meta.
+Obsolet durch 81194a7: initialize ist in MCP 2026-07-28 entfallen; die protocolVersion wird jetzt pro Request aus _meta validiert (handle(), -32022 UnsupportedProtocolVersion).

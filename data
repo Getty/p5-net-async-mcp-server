@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:14Z
+id: 4
+priority: high
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- protocol
+title: tools/call result is not wrapped in MCP content blocks
+updated: 2026-08-16T00:03:28Z
+---
+
+call_tool returns whatever the registered code ref returns and _handle_tools_call puts it straight into the JSON-RPC result. MCP expects { content => [ { type => "text", text => ... } ] } (plus isError for tool-level failures). Cross-check the shape against the sibling client dist Net::Async::MCP before changing.
+Folded into #9 (MCP 2026-07-28 migration): subtask 6 wraps tools/call results in MCP content blocks.
+Erledigt durch 81194a7: tools/call-Ergebnisse werden in MCP-Content-Blocks gewrappt, Server.pm:392-403.

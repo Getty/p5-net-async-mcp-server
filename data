@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:08Z
+id: 3
+priority: high
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- protocol
+title: tools/list emits input_schema, MCP expects inputSchema
+updated: 2026-08-16T00:03:28Z
+---
+
+register_tool stores the hash as passed (input_schema, per the docs) and list_tools returns the registry entries verbatim, so the key reaches the wire unchanged. MCP clients expect inputSchema. Decide whether register_tool normalises on the way in or list_tools maps on the way out; the Perl-facing name should probably stay snake_case.
+Folded into #9 (MCP 2026-07-28 migration): subtask 5 fixes input_schema → inputSchema.
+Erledigt durch 81194a7: register_tool normalisiert input_schema -> inputSchema (Server.pm:153-160); t/02-protocol-2026-07-28.t:72 asserted das Fehlen des snake_case-Keys.

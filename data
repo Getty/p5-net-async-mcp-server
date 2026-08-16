@@ -1,0 +1,43 @@
+---
+claimed_at: 2026-08-16T16:41:32Z
+claimed_by: mcp-server-worker
+class: standard
+completed: 2026-08-16T16:41:32Z
+created: 2026-08-16T16:17:51Z
+id: 15
+priority: high
+started: 2026-08-16T16:26:26Z
+status: done
+tags:
+- transport
+- async
+title: Stdio transport response writes are block-buffered and synchronous
+updated: 2026-08-16T16:41:32Z
+---
+
+Found while implementing #1 (event-loop read side). Pre-existing, not introduced by that change.
+
+lib/Net/Async/MCP/Server/Transport/Stdio.pm, _send_response:
+
+    print { $self->write_handle } encode_json($response) . "\n";
+
+Two problems, both on the write side only:
+
+1. No autoflush. When STDOUT is a pipe to an MCP client - the normal case for
+   this transport - Perl block-buffers it. A response can therefore sit in the
+   buffer while the client waits for it and the server waits for the next
+   request: a deadlock that only breaks when 4-8K of responses have piled up or
+   the process exits. Fix is one line ($fh->autoflush(1), or the equivalent at
+   configure time), but it is a behaviour change on the write handle the caller
+   passed in, so it wants a deliberate decision.
+
+2. The write is a blocking print, so a full stdout pipe blocks the event loop -
+   the same class of problem #1 fixed on the read side. Fixing it properly means
+   routing the write through the same IO::Async::Stream (write_handle => ...,
+   $stream->write(...)), which then needs a flush-before-return at EOF so a
+   response queued when stdin closes is not dropped.
+
+(1) is a correctness bug and cheap. (2) is the honest completion of #1 and
+costs more thought. They can be split.
+Point 1 (autoflush) implemented: handle_requests now calls $self->write_handle->autoflush(1) once on entry, before the read stream is set up. Placed there rather than in configure so the mutation of a caller-owned handle is scoped to the run that actually writes to it, and so merely constructing a transport does not change the process's STDOUT buffering. POD on write_handle and handle_requests records the behaviour change. Regression test: t/04-stdio-transport.t subtest 'responses are flushed as they are written' - real pipes in both directions, response pipe left at default buffering, an IO::Async::Stream reading the far end in the same loop, snapshot taken mid-run before EOF. Verified it fails (undef id, undef content) with the autoflush line removed. Point 2 (blocking print / write via the stream) split out to #18.
+Autoflush half done and regression-tested; blocking-print half split to #18. Not committed - working tree only, per task boundaries.

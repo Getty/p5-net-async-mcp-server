@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-08-16T00:46:56Z
+claimed_by: claude
+class: standard
+completed: 2026-08-16T00:46:56Z
+created: 2026-08-16T00:16:50Z
+id: 12
+priority: medium
+started: 2026-08-16T00:32:41Z
+status: done
+tags:
+- docs
+- api
+title: handle() has no POD at all
+updated: 2026-08-16T00:46:56Z
+---
+
+Net::Async::MCP::Server::handle() is the central JSON-RPC dispatch entry point and the only public API method without a POD block. register_tool, call_tool, list_tools and discover all carry an =method block; handle() carries none.
+
+Needs an =method handle($request) block in the [@Author::GETTY] house format: the single-argument signature, that it returns a JSON-RPC response hashref (or undef for notifications), the per-request _meta contract it validates (io.modelcontextprotocol/protocolVersion required, clientCapabilities required), and which error codes it can produce (-32700, -32600, -32601, -32602, -32020, -32021, -32022).
+
+Pre-existing since the first commit, not a regression. Lane: mcp-server-pod-writer. Spotted while fixing #7 (604d43d).
+Committet als 23708ff auf main und gepusht. =method handle($request) in Server.pm plus ## handle in README.md; POD gegen den Code verifiziert (Notification-Pfad, defined-id-Check, Error-Code-Menge stimmen). Kein Changes-Eintrag - reine Doku.

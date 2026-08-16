@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-08-16T00:17:26Z
+claimed_by: claude
+class: standard
+completed: 2026-08-16T00:17:26Z
+created: 2026-08-15T16:29:43Z
+id: 7
+priority: low
+started: 2026-08-16T00:03:34Z
+status: done
+tags:
+- api
+title: handle() takes an unused $context parameter
+updated: 2026-08-16T00:17:26Z
+---
+
+sub handle { my ($self, $request, $context) = @_; ... } - nothing supplies $context and nothing reads it. Either wire it up (per-request state: session, auth scope, progress token - the sibling client dist hit exactly this with MCP::Server::Context) or drop it from the signature and the POD.
+Superseded by #9 (MCP 2026-07-28 migration):  argument is replaced by per-request _meta block in handle().
+Fix in der Arbeitskopie: $context aus handle() und call_tool() plus POD-Signatur entfernt, Changes-Eintrag unter {{$NEXT}}. Alle Aufrufer waren bereits einargumentig (Stdio.pm:115, StreamableHTTP.pm:394+413, Server.pm:370). prove -l t/ gruen, 51 Tests. Noch nicht committet.
+Committet als 604d43d auf main. Diff: 3 Codezeilen + POD-Signatur in Server.pm, Changes-Eintrag unter {{$NEXT}}. prove -l t/ gruen (51 Tests), $context repo-weit verschwunden.

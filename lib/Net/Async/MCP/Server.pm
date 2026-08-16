@@ -57,22 +57,12 @@ Returns ArrayRef of protocol version strings this server accepts.
 
 =cut
 
-sub _init {
-  my ( $self, $params ) = @_;
-  $self->SUPER::_init($params);
-}
-
 sub configure {
   my ( $self, %params ) = @_;
   if (exists $params{name}) {
     $self->{name} = delete $params{name};
   }
   $self->SUPER::configure(%params);
-}
-
-sub _add_to_loop {
-  my ( $self, $loop ) = @_;
-  $self->SUPER::_add_to_loop($loop);
 }
 
 sub name { shift->{name} // 'NetAsyncMCPServer' }

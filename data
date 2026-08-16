@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-16T00:03:28Z
+created: 2026-08-15T16:29:48Z
+id: 8
+priority: low
+started: 2026-08-16T00:03:28Z
+status: done
+tags:
+- docs
+title: README.md has drifted from POD
+updated: 2026-08-16T00:03:28Z
+---
+
+README.md is hand-maintained: [@Author::GETTY] excludes it from the tarball (include_readme off) and ships a POD-generated plain README instead. So it drifts silently - it still states VERSION 0.001 while the tree carries 0.002, and describes methods in prose the POD words differently. Decide whether to keep it hand-written or set include_readme / generate it.
+Folded into #11 (docs refresh): README version sync + protocol section rewrite.
+Erledigt durch 81194a7: README.md auf 0.002 (lockstep mit $VERSION), deckt server/discover und Transport::StreamableHTTP ab.

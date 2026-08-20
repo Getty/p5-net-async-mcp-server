@@ -5,10 +5,10 @@ model: sonnet
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-core
+    - getty-perl-core
     - perl-mcp
     - perl-io-async-future
-    - karr
+    - kanban-issues-karr-cli
 ---
 
 You are the mcp-server-test-writer for **Net::Async::MCP::Server**.

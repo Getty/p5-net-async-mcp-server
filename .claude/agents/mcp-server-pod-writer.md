@@ -5,8 +5,8 @@ model: sonnet
 allowed-tools: Read, Edit, Grep, Glob
 briefing:
   skills:
-    - perl-release-author-getty
-    - perl-core
+    - getty-perl-release-author-getty
+    - getty-perl-core
     - perl-mcp
 ---
 

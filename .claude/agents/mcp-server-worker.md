@@ -5,12 +5,12 @@ model: inherit
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-core
+    - getty-perl-core
     - perl-mcp
     - perl-io-async-future
     - perl-release-dist-ini
-    - perl-release-author-getty
-    - karr
+    - getty-perl-release-author-getty
+    - kanban-issues-karr-cli
 ---
 
 You are the mcp-server-worker for **Net::Async::MCP::Server**, an async MCP (Model

@@ -55,7 +55,7 @@ wording, and `Changes` notes are not.
 ## Coordination — karr board (always in scope)
 
 Ticket coordination is the orchestrating agent's job, so `karr` is always in scope —
-don't invoke the `karr` skill first, just use it. Git-native kanban; state lives in
+don't invoke the `kanban-issues-karr-cli` skill first, just use it. Git-native kanban; state lives in
 `refs/karr/*`. This repo has its own board — no cross-repo handoff, but see the sibling
 note below. Day-to-day:
 
@@ -103,7 +103,7 @@ user explicitly says to handle a specific item; every write is confirmed first.
 
 ## Perl specifics — reference, don't restate
 
-Module loading, cpanfile pinning, and house style: skill `perl-core`. Async/Future
+Module loading, cpanfile pinning, and house style: skill `getty-perl-core`. Async/Future
 lifecycle: skill `perl-io-async-future`. MCP protocol surface: skill `perl-mcp`. Release
-conventions: `perl-release-author-getty` + `perl-release-dist-ini`. All force-loaded for
+conventions: `getty-perl-release-author-getty` + `perl-release-dist-ini`. All force-loaded for
 `mcp-server-*` agents — do not duplicate here.

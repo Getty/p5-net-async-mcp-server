@@ -1,0 +1,33 @@
+---
+class: standard
+completed: 2026-09-01T05:28:38Z
+created: 2026-09-01T05:01:21Z
+id: 28
+priority: high
+started: 2026-09-01T05:16:01Z
+status: done
+tags:
+- tests
+title: 'Test coverage: must-haves + new features + fix misleading warn test'
+updated: 2026-09-01T05:28:38Z
+---
+
+Must-haves: (1) notifications/initialized WITH id -> -32601; (2) clientCapabilities undef/null still passes (only exists checked); (3) id==0 and id=="" treated as defined; (4) tool without code -> isError has-no-implementation. Fix t/03 non-loopback-warns test (currently asserts nothing; warn is in listen(), never called) via mocking HTTP::Server::PSGI new/run - no socket bind. Add tests for all new features (resources, prompts, rich/structured content, annotations passthrough, subscriptions conformance). Add StreamableHTTP to t/00 load test.
+
+Test note check
+
+Fixed the RED: rewrote t/03 subtest #18 to POST subscriptions/listen through the full PSGI path (matching MCP-Protocol-Version/Mcp-Method headers, valid _meta) and assert -32601, removing the keepalive_interval leftover and the now-dead _RecorderWriter/_FakeWriter helper packages.
+
+Added to t/02-protocol-2026-07-28.t: notifications/initialized WITH id -> -32601; clientCapabilities undef/null still dispatches (exists-only check pinned); id==0 and id=='' get real responses; tool with no code -> isError /has no implementation/; _meta.serverInfo on tools/call success+isError; exact encode_json for arrayref/hashref tool returns; undef tool return -> empty-string text; rich content (content[]+structuredContent) passthrough, both combined and structuredContent-alone; annotations+outputSchema passthrough into tools/list.
+
+New file t/05-resources-prompts.t (git add -N'd): resources/list and prompts/list wire shape (required + optional fields), resources/read and prompts/get default wrapping vs. code passthrough, unknown uri/name -> -32602, capabilities.resources/prompts advertised only when >=1 registered.
+
+t/03 additions: DELETE and PUT /mcp -> 405 (separate branches from GET); Accept:text/event-stream on an erroring request downgrades to plain JSON; origin_allow configured but no Origin header sent -> 200. Fixed the misleading 'non-loopback host warns' test by mocking HTTP::Server::PSGI::new/run (local *glob) so listen() actually runs and @warn is asserted for real, plus new loopback-no-warn and allow_external_bind-no-warn cases. t/00-load.t: added StreamableHTTP load check.
+
+Did not touch lib/*.pm or README (pod-writer's lane, running in parallel).
+
+Final: prove -l t/ -> Files=6, Tests=83, all green. dzil test -> Files=8, Tests=86, all green (confirms the new file was gathered).
+
+2026-09-01 05:21 Test pass complete, all green, ready for review.
+
+Follow-up fix (post-handoff): the 'exact encode_json for hashref return' assertion was flaky — confirmed empirically that two independently-built Perl hashrefs with identical keys can iterate in different order within the same process (not just across process runs), so encode_json() of two equal-content-but-different-object hashrefs can differ. Fixed by having the test compare against encode_json() of the SAME hashref reference the tool returns, not a freshly-built literal with equal content. Verified with 20x repeated prove runs on t/02 and 10x on the full suite t/ (all green) plus dzil test (Files=8, Tests=86, green).

@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-01T05:11:21Z
+created: 2026-09-01T05:01:12Z
+id: 26
+priority: high
+started: 2026-09-01T05:11:21Z
+status: done
+tags:
+- release
+- dist
+title: 'dist: prune .claude and CLAUDE.md from CPAN tarball'
+updated: 2026-09-01T05:11:21Z
+---
+
+Since 0.001, Git::GatherDir ships .claude/ (agents, rules, skills, settings.json) and CLAUDE.md into the CPAN tarball. Add [PruneFiles]/[GatherDir exclude] so internal agent tooling does not go to CPAN.
+
+Dropped: shipping .claude/ + CLAUDE.md in the tarball is the house convention across all Getty dists, not a defect. Maintainer confirmed. Reverted the [PruneFiles] I wrongly added.

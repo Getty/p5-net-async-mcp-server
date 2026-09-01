@@ -15,5 +15,4 @@ on test => sub {
 
 on develop => sub {
   requires 'Dist::Zilla';
-  requires 'Dist::Zilla::PluginBundle::Author::GETTY';
 };

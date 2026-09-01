@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-01T05:28:03Z
+created: 2026-09-01T05:00:33Z
+id: 21
+priority: high
+started: 2026-09-01T05:03:13Z
+status: done
+tags:
+- feature
+- protocol
+title: Rich/structured tools/call content passthrough
+updated: 2026-09-01T05:28:03Z
+---
+
+In _handle_tools_call pass-through branch: if tool returns a hashref carrying content arrayref and/or structuredContent (without resultType), pass it through verbatim instead of re-wrapping. Keep scalar->text default and ref->JSON default for bare returns. Pairs with annotations/outputSchema passthrough (P0-B).
+
+Added rich-content passthrough branch in _handle_tools_call: hashref with content arrayref and/or structuredContent (no resultType) passes through verbatim into a complete result. Scalar->text and bare-ref->JSON defaults unchanged. POD updated. 56 tests green.

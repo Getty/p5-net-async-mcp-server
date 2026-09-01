@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-01T05:28:12Z
+created: 2026-09-01T05:00:38Z
+id: 22
+priority: high
+started: 2026-09-01T05:02:41Z
+status: done
+tags:
+- bug
+- protocol
+title: 'P0: tool annotations + outputSchema dropped on wire'
+updated: 2026-09-01T05:28:12Z
+---
+
+_tool_wire_shape whitelists only name/description/inputSchema/title, silently dropping annotations and outputSchema passed to register_tool. Copy them through with the same defined-guard as title.
+
+Copy annotations + outputSchema through _tool_wire_shape with the same defined-guard as title. 56 tests green.

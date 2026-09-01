@@ -44,8 +44,11 @@ against the JSON-RPC body, and answers each request with either an
 C<application/json> response or a C<text/event-stream> stream.
 
 The transport is a thin wrapper around L<Net::Async::MCP::Server/handle>: the
-PSGI handler decodes the envelope, runs the spec-mandated header checks, and
-hands the validated request to C<handle()>. Method implementations live in
+PSGI handler decodes the envelope and hands the request to C<handle()>. The
+spec-mandated header checks run first, but only for requests that carry an
+C<id> — a notification (no C<id>) skips them entirely and goes straight to
+C<handle()>, since the 2026-07-28 spec does not define header requirements
+for notification POSTs. Method implementations live in
 L<Net::Async::MCP::Server>; this module is the HTTP layer and nothing else.
 
 =head1 PROTOCOL
@@ -103,10 +106,6 @@ my $METHOD_HEADER       = 'Mcp-Method';
 my $NAME_HEADER         = 'Mcp-Name';
 my $PARAM_HEADER_PREFIX = 'Mcp-Param-';
 
-# 15s per the spec's example interval. Make it configurable so tests don't sit
-# waiting for a keepalive between events; a value of 0 disables keepalives.
-my $DEFAULT_KEEPALIVE = 15;
-
 sub new {
     my ( $class, %params ) = @_;
     my $server = delete $params{server};
@@ -117,7 +116,7 @@ sub new {
 
 sub configure {
     my ( $self, %params ) = @_;
-    for my $key (qw( server host port path origin_allow keepalive_interval )) {
+    for my $key (qw( server host port path origin_allow )) {
         $self->{$key} = delete $params{$key} if exists $params{$key};
     }
 
@@ -125,7 +124,6 @@ sub configure {
     $self->{port}        //= 8080;
     $self->{path}        //= '/mcp';
     $self->{origin_allow} //= [];
-    $self->{keepalive_interval} //= $DEFAULT_KEEPALIVE;
 
     # Adapt origin_allow to a hash for O(1) membership tests.
     if ( ref $self->{origin_allow} eq 'ARRAY' ) {
@@ -189,17 +187,6 @@ known web origins.
 =cut
 
 sub origin_allow { $_[0]->{origin_allow} || [] }
-
-=method keepalive_interval
-
-    my $seconds = $transport->keepalive_interval;
-
-Seconds between C<:keepalive> SSE comment lines on long-lived streams. Defaults
-to 15s per the spec; set to 0 to disable.
-
-=cut
-
-sub keepalive_interval { $_[0]->{keepalive_interval} }
 
 =method to_app
 
@@ -332,15 +319,8 @@ sub _origin_blocked_response {
     ];
 }
 
-=method _handle_request
-
-    my $psgi_response = $transport->_handle_request($env);
-
-The PSGI entry point — one call per HTTP request. Exposed mostly for tests
-that want to feed canned C<%env> hashes around C<to_app>.
-
-=cut
-
+# The PSGI entry point (private) — one call per HTTP request. Exposed
+# mostly for tests that want to feed canned %env hashes around to_app.
 sub _handle_request {
     my ( $self, $env ) = @_;
 
@@ -401,12 +381,10 @@ sub _handle_request {
         return $err;
     }
 
-    # subscriptions/listen is special: the response is a long-lived SSE
-    # stream, not a one-shot object. The spec mandates the response stream
-    # begin with notifications/subscriptions/acknowledged and stay open.
-    if ( ( $request->{method} // '' ) eq 'subscriptions/listen' ) {
-        return $self->_handle_subscriptions_listen($env, $request);
-    }
+    # subscriptions/listen has no server->client push channel to deliver
+    # *ListChanged in 0.002, so it falls through to handle() and gets the
+    # normal -32601 — the same answer the Stdio transport gives. Real push
+    # delivery is deferred to karr #24.
 
     # Default: synchronous JSON-RPC dispatch. handle() returns either a
     # response hashref or undef (the no-id case we already handled above
@@ -684,72 +662,6 @@ sub _handle_sse_stream {
         ]);
         $writer->write( $self->_format_sse_event( '', $jsonrpc ) );
         $writer->close;
-        return;
-    };
-}
-
-# subscriptions/listen. The response stream stays open until the client
-# closes it (or, in this server's stub form, until the loop gives up). We
-# emit the acknowledgement notification first, then nothing else — the
-# change-notification events this stub lacks are a future ticket. A
-# periodic keepalive per keepalive_interval keeps intermediaries from
-# dropping the idle stream.
-#
-# The spec does not require any deep feature support here yet, so this is
-# intentionally minimal: the protocol surface is right, the depth is not.
-sub _handle_subscriptions_listen {
-    my ( $self, $env, $request ) = @_;
-    my $id  = $request->{id};
-    my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
-    my $requested = ref $params->{notifications} eq 'HASH'
-        ? $params->{notifications} : {};
-
-    my $ack = {
-        jsonrpc => '2.0',
-        method  => 'notifications/subscriptions/acknowledged',
-        params  => {
-            _meta => {
-                'io.modelcontextprotocol/subscriptionId' => $id,
-            },
-            notifications => $requested,
-        },
-    };
-    my $ack_json = encode_json($ack);
-
-    return sub {
-        my ( $respond ) = @_;
-        my $writer = $respond->([
-            200,
-            $self->_sse_headers,
-        ]);
-
-        $writer->write( $self->_format_sse_event( '', $ack_json ) );
-
-        my $interval = $self->{keepalive_interval};
-        my $loop     = $self->loop;
-        return $writer->close
-            unless $interval && $interval > 0 && $loop;
-
-        # The keepalive timer fires every $interval seconds and writes an
-        # SSE comment until either party closes the stream. Attached as a
-        # child of the transport so it leaves the loop alongside it; a
-        # closed writer (Plack signals this by failing further writes) means
-        # the periodic timer's next tick has nothing to do and stays
-        # harmless.
-        require IO::Async::Timer::Periodic;
-        my %state = ( writer => $writer );
-        my $timer = IO::Async::Timer::Periodic->new(
-            interval => $interval,
-            on_tick  => sub {
-                my $w = $state{writer};
-                eval { $w->write(":keepalive\r\n") };
-                $state{done} = 1 if $@;
-                return;
-            },
-            on_stop => sub { $state{done} = 1 },
-        );
-        $self->add_child($timer);
-        $timer->start;
         return;
     };
 }

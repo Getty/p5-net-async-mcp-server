@@ -34,8 +34,9 @@ carries its protocol version, client capabilities, and identity inline in the
 `_meta` field, and every successful result carries a `resultType` and a
 `_meta.io.modelcontextprotocol/serverInfo` entry.
 
-Subclasses register tools; the base class handles JSON-RPC 2.0 dispatch and
-the per-request validation the spec mandates. Two transports are included:
+Subclasses register tools, resources, and prompts; the base class handles
+JSON-RPC 2.0 dispatch and the per-request validation the spec mandates. Two
+transports are included:
 
 - [Net::Async::MCP::Server::Transport::Stdio](https://metacpan.org/pod/Net::Async::MCP::Server::Transport::Stdio) —
   newline-delimited JSON-RPC over stdin/stdout.
@@ -65,9 +66,24 @@ The methods this server implements:
   the `tools` array (each with `inputSchema` in wire shape), and the same
   caching hints as above.
 - **tools/call** — invoke a tool by name. A tool's plain return value is
-  wrapped in a `text` content block; a tool that returns a hashref with
-  `resultType` set (e.g. `"input_required"` for MRTR) is passed through
-  unchanged so multi round-trip requests work without further changes.
+  wrapped in a `text` content block; a tool may instead return a hashref
+  carrying its own `content` array and/or `structuredContent` (images,
+  multiple text blocks, structured data), which is passed through verbatim;
+  a hashref with `resultType` set (e.g. `"input_required"` for MRTR) is
+  passed through unchanged so multi round-trip requests work without
+  further changes.
+- **resources/list** — list registered resources. Returns `resultType
+  "complete"` and the `resources` array (`uri`, `name`, and the optional
+  `mimeType`, `description`, `title`).
+- **resources/read** — read a resource by URI (`params.uri`; unregistered
+  URI returns `-32602`). Returns `{ contents => [ { uri, mimeType?, text }
+  ] }`.
+- **prompts/list** — list registered prompts. Returns `resultType
+  "complete"` and the `prompts` array (`name`, `arguments`, and the
+  optional `title`, `description`).
+- **prompts/get** — fetch a prompt by name (`params.name`; unregistered
+  name returns `-32602`). Returns `{ description?, messages => [ { role,
+  content => { type => "text", text } } ] }`.
 
 The methods the previous revision exposed — `initialize`,
 `notifications/initialized`, `ping` — are no longer recognised and return
@@ -79,10 +95,14 @@ layer; callers do not have to add it themselves.
 
 ## Error Codes
 
+- `-32700 Parse error` — `handle()` was given something other than a
+  hashref (a transport failed to decode the wire message into one).
+- `-32600 Invalid Request` — the hashref has no defined `method`.
 - `-32601 Method not found` — unimplemented method (e.g. `initialize`,
   `ping` from the previous revision).
-- `-32602 Invalid params` — missing or malformed `_meta`, or `tools/call`
-  with an unknown tool name.
+- `-32602 Invalid params` — missing or malformed `_meta`, `tools/call`
+  with an unknown tool name, `resources/read` with an unknown URI, or
+  `prompts/get` with an unknown name.
 - `-32020 HeaderMismatch` — Streamable HTTP only: an MCP request-metadata
   header disagrees with the matching field in the JSON-RPC body. Not
   raised by `Net::Async::MCP::Server::handle` itself.
@@ -97,7 +117,8 @@ The server is built on
 non-blocking I/O and uses
 [Future::AsyncAwait](https://metacpan.org/pod/Future::AsyncAwait) for clean
 `async sub` methods. Methods that return a `Future` (`discover`,
-`list_tools`, `call_tool`) are explicitly marked in the POD.
+`list_tools`, `call_tool`, `list_resources`, `read_resource`,
+`list_prompts`, `get_prompt`) are explicitly marked in the POD.
 
 # METHODS
 
@@ -191,6 +212,88 @@ Returns a `Future` that resolves to one of:
   `isError: true` content block (recoverable), not a JSON-RPC error
   (which would abort the call).
 
+## resources
+
+    my $resources = $server->resources;
+
+Returns the ArrayRef of registered resource definitions (internal storage
+shape).
+
+## register_resource
+
+    $server->register_resource(
+        uri      => 'file:///notes.txt',
+        name     => 'notes',
+        mimeType => 'text/plain',
+        code     => sub {
+            my ($uri) = @_;
+            return "some notes";
+        },
+    );
+
+Registers a resource. Expects `uri` and `name`, an optional `mimeType`,
+`description` and `title`, and a `code` reference invoked with the
+resource URI when the resource is read.
+
+## list_resources
+
+    my $resources = $server->list_resources->get;
+
+Returns a `Future` that resolves to the ArrayRef of resource definitions
+in wire shape (`uri`, `name`, and the optional `mimeType`, `description`,
+`title`).
+
+## read_resource
+
+    my $result = $server->read_resource($uri)->get;
+    # { contents => [ { uri => $uri, text => '...' } ] }
+
+Returns a `Future` that resolves to a hashref of the shape `{ contents =>
+[ { uri, mimeType?, text } ] }`. Looks up `$uri` in the resource registry
+and invokes its `code` reference with the URI. A resource whose `code`
+returns a hashref already carrying a `contents` arrayref is passed through
+verbatim; any other return value is stringified into a single text
+content block tagged with the resource's `mimeType`.
+
+## prompts
+
+    my $prompts = $server->prompts;
+
+Returns the ArrayRef of registered prompt definitions (internal storage
+shape).
+
+## register_prompt
+
+    $server->register_prompt(
+        name => 'greeting',
+        code => sub {
+            my ($arguments) = @_;
+            return "Hello, $arguments->{name}!";
+        },
+    );
+
+Registers a prompt. Expects `name`, optional `title`, `description` and an
+`arguments` ArrayRef, and a `code` reference invoked with the request
+arguments when the prompt is fetched.
+
+## list_prompts
+
+    my $prompts = $server->list_prompts->get;
+
+Returns a `Future` that resolves to the ArrayRef of prompt definitions in
+wire shape (`name`, `arguments`, and the optional `title`, `description`).
+
+## get_prompt
+
+    my $result = $server->get_prompt($name, $arguments)->get;
+
+Returns a `Future` that resolves to a hashref of the shape `{
+description?, messages => [ { role, content => { type => "text", text }
+} ] }`. Looks up `$name` in the prompt registry and invokes its `code`
+reference with `$arguments`. A prompt whose `code` returns a hashref
+already carrying a `messages` arrayref is passed through verbatim; any
+other return value is stringified into a single `user` text message.
+
 ## handle
 
     my $response = $server->handle($request);
@@ -200,9 +303,10 @@ JSON-RPC request or notification hashref (`jsonrpc`, `method`, and
 optionally `id` and `params`); transports decode wire JSON before calling
 this and encode whatever it returns.
 
-`handle` is synchronous, not a `Future`-returning method: it calls
-`->get` internally on the `Future`s from `discover`, `list_tools` and
-`call_tool` and hands back a plain result.
+`handle` is synchronous, not a `Future`-returning method: it calls `->get`
+internally on the `Future`s from `discover`, `list_tools`, `call_tool`,
+`list_resources`, `read_resource`, `list_prompts` and `get_prompt`, and
+hands back a plain result.
 
 If `$request` has a defined `id` key (`0` or `''` counts; only an absent
 key or a JSON `null` id does not), `handle` returns a JSON-RPC response or
@@ -216,8 +320,11 @@ defined `method` returns `-32600`.
 
 For every request that does carry an `id`, the per-request `_meta`
 contract described above is validated before dispatch, then `method` is
-mapped to `server/discover` → `discover`, `tools/list` → `list_tools`, or
-`tools/call` → `call_tool` (unregistered tool name: `-32602`). Any other
+mapped to `server/discover` → `discover`, `tools/list` → `list_tools`,
+`tools/call` → `call_tool` (unregistered tool name: `-32602`),
+`resources/list` → `list_resources`, `resources/read` → `read_resource`
+(unregistered URI: `-32602`), `prompts/list` → `list_prompts`, or
+`prompts/get` → `get_prompt` (unregistered name: `-32602`). Any other
 method — including the previous revision's `initialize`, `ping` and
 `notifications/initialized` — returns `-32601`, but only when sent with
 an `id`; the same method names sent as notifications (no `id`) are
@@ -281,12 +388,15 @@ The Streamable HTTP transport from MCP 2026-07-28. A conforming client
 POSTs every JSON-RPC request or notification to a single endpoint (the
 MCP endpoint, by default `/mcp`) and sets the request-metadata headers
 the spec defines: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for
-`tools/call`), and `Mcp-Param-{Name}` for any tool argument annotated
-with `x-mcp-header: "{Name}"` in its `inputSchema`. Any header/body
-divergence returns JSON-RPC `-32020 HeaderMismatch`. The transport answers
-each request as `application/json` (default) or as `text/event-stream`
-when the client's `Accept` header asks for it; `subscriptions/listen`
-keeps the SSE stream open with periodic `:keepalive` comments.
+`tools/call`, `resources/read`, `prompts/get`), and `Mcp-Param-{Name}`
+for any tool argument annotated with `x-mcp-header: "{Name}"` in its
+`inputSchema`. These header checks apply only to requests that carry an
+`id` — a notification skips them and goes straight to `handle()`. Any
+header/body divergence returns JSON-RPC `-32020 HeaderMismatch`. The
+transport answers each request as `application/json` (default) or as
+`text/event-stream` when the client's `Accept` header asks for it: the
+JSON-RPC response is emitted as a single SSE event and the stream is then
+closed.
 
 The transport is a thin wrapper around `Net::Async::MCP::Server::handle`;
 method implementations live in
@@ -313,7 +423,9 @@ Torsten Raudssus `<getty@cpan.org>`
 
 Copyright 2026 Torsten Raudssus.
 
-This program is free software; you can redistribute it and/or modify it
-under the terms of the Artistic License version 2.0.
+This is free software; you can redistribute it and/or modify it under the
+same terms as the Perl 5 programming language system itself — the GNU
+General Public License, Version 1 (or, at your option, any later version),
+or the Artistic License.
 
-See [https://raudss.us.devel](https://raudss.us.devel) for the full license text.
+See [https://raudssus.de/](https://raudssus.de/) for more about the author.

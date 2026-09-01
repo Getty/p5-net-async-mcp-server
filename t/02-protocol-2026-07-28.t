@@ -3,6 +3,8 @@ use warnings;
 
 use Test2::V0;
 use Net::Async::MCP::Server;
+use JSON::MaybeXS qw( encode_json );
+use Future;
 
 # Helper: build a fully-formed 2026-07-28 request envelope. Tests can override
 # any field by passing args.
@@ -464,6 +466,330 @@ subtest 'call_tool gets full arguments ref and additional context-free path' => 
 
     my $r = $response->{result};
     is($r->{content}[0]{text}, '5', 'plain return stringified into text content');
+};
+
+subtest 'notifications/initialized sent WITH an id returns -32601' => sub {
+    # notifications/initialized is a legacy handshake method name. Sent as a
+    # true notification (no id) it is a silent no-op (see the subtest above);
+    # sent WITH an id it is a normal request, and normal requests get the
+    # same -32601 Method not found any other unrecognised method gets.
+    my $server = Net::Async::MCP::Server->new;
+
+    my $response = $server->handle(_req(id => 50, method => 'notifications/initialized'));
+
+    ok($response, 'got response');
+    is($response->{error}{code}, -32601, 'error code -32601 Method not found');
+};
+
+subtest 'clientCapabilities present but undef (JSON null) still passes' => sub {
+    # _validate_request_meta only checks `exists` on this key, never
+    # `defined` — a client legitimately sending JSON null for
+    # clientCapabilities must still dispatch. Pin this so a well-meaning
+    # exists->defined "fix" would break it and be caught here.
+    my $server = Net::Async::MCP::Server->new;
+
+    my $response = $server->handle({
+        jsonrpc => '2.0',
+        id      => 51,
+        method  => 'server/discover',
+        params  => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => undef,
+            },
+        },
+    });
+
+    ok($response, 'got response');
+    ok(!exists $response->{error}, 'no JSON-RPC error');
+    ok(exists $response->{result}, 'result present');
+    is($response->{result}{resultType}, 'complete', 'resultType complete');
+};
+
+subtest 'id == 0 and id == "" count as defined, not a notification' => sub {
+    for my $id (0, '') {
+        my $server = Net::Async::MCP::Server->new;
+        my $response = $server->handle(_req(method => 'server/discover', id => $id));
+
+        ok(defined $response, "id " . ( length("$id") ? "'$id'" : "''" ) . " gets a real response, not undef");
+        is($response->{jsonrpc}, '2.0', 'jsonrpc 2.0');
+        is($response->{id}, $id, 'response id echoes the request id exactly');
+        ok(exists $response->{result}, 'result present (dispatched, not treated as a notification)');
+    }
+};
+
+subtest 'tool registered with no code -> isError with has no implementation' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'no_code',
+        description => 'Registered without a code ref',
+        inputSchema => { type => 'object' },
+    );
+
+    my $response = $server->handle(_req(
+        id     => 52,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'no_code',
+            arguments => {},
+        },
+    ));
+
+    ok($response, 'got response');
+    ok(!exists $response->{error}, 'no JSON-RPC error (routed as a tool failure)');
+    my $r = $response->{result};
+    is($r->{resultType}, 'complete', 'resultType complete');
+    ok($r->{isError}, 'isError true');
+    like(
+        $r->{content}[0]{text},
+        qr/has no implementation/,
+        'content text explains the tool has no implementation',
+    );
+};
+
+subtest '_meta.serverInfo present on tools/call success and isError results' => sub {
+    my $server = Net::Async::MCP::Server->new(name => 'call-meta-server');
+    $server->register_tool(
+        name        => 'ok_tool',
+        description => 'Succeeds',
+        inputSchema => { type => 'object' },
+        code        => sub { return 'fine' },
+    );
+    $server->register_tool(
+        name        => 'bad_tool',
+        description => 'Fails',
+        inputSchema => { type => 'object' },
+        code        => sub { die "nope\n" },
+    );
+
+    for my $name (qw(ok_tool bad_tool)) {
+        my $response = $server->handle(_req(
+            id     => 53,
+            method => 'tools/call',
+            params => {
+                _meta => {
+                    'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities' => {},
+                },
+                name      => $name,
+                arguments => {},
+            },
+        ));
+        is(
+            $response->{result}{_meta}{'io.modelcontextprotocol/serverInfo'}{name},
+            'call-meta-server',
+            "serverInfo present for $name",
+        );
+    }
+};
+
+subtest 'tools/call default wrapping: exact encode_json for arrayref and hashref returns' => sub {
+    # A hashref's key iteration order is not guaranteed to match between two
+    # independently-built hashrefs with identical keys, even within the same
+    # process (Perl's per-hash bucket layout, not just a per-process seed) —
+    # so the expected-value hashref must be the *same* reference the tool
+    # returns, not a fresh literal with equal content, or this test is
+    # flaky. Arrays don't have this problem: order is always insertion order.
+    my $expected_hash = { a => 1, b => 2 };
+
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'array_tool',
+        description => 'Returns an arrayref',
+        inputSchema => { type => 'object' },
+        code        => sub { return [ 1, 2, 'three' ] },
+    );
+    $server->register_tool(
+        name        => 'hash_tool',
+        description => 'Returns a hashref',
+        inputSchema => { type => 'object' },
+        code        => sub { return $expected_hash },
+    );
+
+    my $array_response = $server->handle(_req(
+        id     => 54,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'array_tool',
+            arguments => {},
+        },
+    ));
+    is(
+        $array_response->{result}{content}[0]{text},
+        encode_json([ 1, 2, 'three' ]),
+        'arrayref return is exact encode_json of the returned value',
+    );
+
+    my $hash_response = $server->handle(_req(
+        id     => 55,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'hash_tool',
+            arguments => {},
+        },
+    ));
+    is(
+        $hash_response->{result}{content}[0]{text},
+        encode_json($expected_hash),
+        'hashref return is exact encode_json of the returned value',
+    );
+};
+
+subtest 'tools/call default wrapping: undef return becomes empty-string text' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'undef_tool',
+        description => 'Returns undef',
+        inputSchema => { type => 'object' },
+        code        => sub { return undef },
+    );
+
+    my $response = $server->handle(_req(
+        id     => 56,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'undef_tool',
+            arguments => {},
+        },
+    ));
+
+    is($response->{result}{content}[0]{text}, '', 'undef return is empty-string text content');
+};
+
+subtest 'tools/call rich content: content arrayref and structuredContent pass through verbatim' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'rich_tool',
+        description => 'Returns its own content blocks',
+        inputSchema => { type => 'object' },
+        code        => sub {
+            return {
+                content => [
+                    { type => 'text',  text => 'first block' },
+                    { type => 'image', data => 'ZmFrZQ==', mimeType => 'image/png' },
+                ],
+                structuredContent => { total => 42 },
+            };
+        },
+    );
+
+    my $response = $server->handle(_req(
+        id     => 57,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'rich_tool',
+            arguments => {},
+        },
+    ));
+
+    my $r = $response->{result};
+    is($r->{resultType}, 'complete', 'resultType filled in as complete');
+    is(scalar @{ $r->{content} }, 2, 'both content blocks passed through');
+    is($r->{content}[0]{text}, 'first block', 'first block verbatim');
+    is($r->{content}[1]{type}, 'image', 'second block verbatim (not re-wrapped)');
+    is($r->{structuredContent}{total}, 42, 'structuredContent passed through');
+};
+
+subtest 'tools/call rich content: structuredContent alone (no content key) passes through' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'structured_only_tool',
+        description => 'Returns only structuredContent',
+        inputSchema => { type => 'object' },
+        code        => sub {
+            return { structuredContent => { ok => JSON::MaybeXS::true() } };
+        },
+    );
+
+    my $response = $server->handle(_req(
+        id     => 58,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'structured_only_tool',
+            arguments => {},
+        },
+    ));
+
+    my $r = $response->{result};
+    is($r->{resultType}, 'complete', 'resultType filled in as complete');
+    ok(!exists $r->{content}, 'no content key added by default wrapping');
+    ok($r->{structuredContent}{ok}, 'structuredContent passed through verbatim');
+};
+
+subtest 'tools/call tool returning a Future is awaited before wrapping' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name        => 'future_tool',
+        description => 'Returns a Future',
+        inputSchema => { type => 'object' },
+        code        => sub { return Future->done({ ok => 1 }) },
+    );
+
+    my $response = eval { $server->handle(_req(
+        id     => 60,
+        method => 'tools/call',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            name      => 'future_tool',
+            arguments => {},
+        },
+    )) };
+
+    ok($response, 'got response, no exception escaped handle()');
+    ok(!exists $response->{error}, 'no JSON-RPC error');
+    my $r = $response->{result};
+    is($r->{resultType}, 'complete', 'resultType complete');
+    like($r->{content}[0]{text}, qr/ok/, 'Future resolved into text content');
+};
+
+subtest 'tool annotations and outputSchema pass through into tools/list wire shape' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name         => 'annotated_tool',
+        description  => 'Carries annotations and outputSchema',
+        inputSchema  => { type => 'object' },
+        annotations  => { readOnlyHint => 1, destructiveHint => 0 },
+        outputSchema => { type => 'object', properties => { total => { type => 'number' } } },
+    );
+
+    my $response = $server->handle(_req(method => 'tools/list', id => 59));
+
+    my $tool = $response->{result}{tools}[0];
+    is($tool->{annotations}{readOnlyHint}, 1, 'annotations.readOnlyHint passed through');
+    is($tool->{annotations}{destructiveHint}, 0, 'annotations.destructiveHint passed through');
+    is($tool->{outputSchema}{type}, 'object', 'outputSchema passed through');
+    is(
+        $tool->{outputSchema}{properties}{total}{type},
+        'number',
+        'outputSchema nested detail passed through',
+    );
 };
 
 done_testing;

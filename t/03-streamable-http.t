@@ -7,7 +7,7 @@ use JSON::MaybeXS qw( encode_json decode_json );
 use MIME::Base64 qw( encode_base64 );
 use Encode      qw( encode );
 
-use HTTP::Request::Common qw( POST GET );
+use HTTP::Request::Common qw( POST GET PUT DELETE );
 use Plack::Test();
 
 use Net::Async::MCP::Server;
@@ -19,46 +19,6 @@ sub _decode_ok {
     ok( ref $out eq 'HASH', 'body decoded as hashref' );
     return $out;
 }
-
-# A handler that records what was written through the Plack writer and
-# signals done, so streaming tests can inspect both the chunking and the
-# eventual close without spinning a real HTTP server.
-package _RecorderWriter {
-    sub new {
-        my ($class) = @_;
-        return bless { chunks => [], closed => 0,}, $class;
-    }
-    sub write {
-        my ($self, $chunk) = @_;
-        push @{ $self->{chunks} }, $chunk;
-        return length $chunk;
-    }
-    sub close {
-        my ($self) = @_;
-        $self->{closed} = 1;
-        return;
-    }
-}
-
-package _FakeWriter {
-    sub new {
-        my ($class, %opts) = @_;
-        return bless {
-            recorder  => $opts{recorder},
-            on_close  => $opts{on_close} // sub {},
-        }, $class;
-    }
-    sub write {
-        my ($self, $chunk) = @_;
-        return $self->{recorder}->write($chunk);
-    }
-    sub close {
-        my ($self) = @_;
-        return $self->{on_close}->();
-    }
-}
-
-package main;
 
 sub _build_envelope {
     my (%over) = @_;
@@ -124,7 +84,6 @@ subtest 'POST application/json returns JSON-RPC response' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -151,7 +110,6 @@ subtest 'POST text/event-stream wraps response in SSE' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -179,11 +137,47 @@ subtest 'POST text/event-stream wraps response in SSE' => sub {
     is($payload->{result}{resultType}, 'complete', 'resultType complete');
 };
 
+subtest 'Accept: text/event-stream on an erroring request downgrades to plain JSON' => sub {
+    # SSE alone can't carry a JSON-RPC error in any spec-mandated way, so a
+    # request that would normally stream falls back to application/json
+    # once handle() answers with an error instead of a result.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $envelope = _build_envelope(
+        id     => 55,
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '1999-01-01',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+        },
+    );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'           => 'application/json',
+        'Accept'                 => 'application/json, text/event-stream',
+        'MCP-Protocol-Version'   => '1999-01-01',
+        'Mcp-Method'             => 'server/discover',
+        'Content'                => encode_json($envelope),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK (JSON-RPC error, not an HTTP error)');
+    is($res->content_type, 'application/json', 'plain JSON, not SSE, despite Accept');
+
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32022, 'JSON-RPC error -32022 Unsupported protocol version');
+};
+
 subtest 'notifications/initialized returns 202 with no body' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -208,7 +202,6 @@ subtest 'MCP-Protocol-Version mismatch returns 400 -32020' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -247,7 +240,6 @@ subtest 'Mcp-Method mismatch returns 400 -32020' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -275,7 +267,6 @@ subtest 'Mcp-Name mismatch returns 400 -32020' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -304,7 +295,6 @@ subtest 'Origin not in allowlist returns 403' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server              => $server,
-        keepalive_interval  => 0,
         origin_allow        => ['https://trusted.example.com'],
     );
     my $test = Plack::Test->create( $t->to_app );
@@ -336,7 +326,6 @@ subtest 'Origin in allowlist passes' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server              => $server,
-        keepalive_interval  => 0,
         origin_allow        => ['https://trusted.example.com'],
     );
     my $test = Plack::Test->create( $t->to_app );
@@ -355,11 +344,34 @@ subtest 'Origin in allowlist passes' => sub {
     is($res->code, 200, '200 OK on allowed origin');
 };
 
+subtest 'origin_allow configured but no Origin header sent passes' => sub {
+    # A deliberate non-browser passthrough: the Origin header only exists
+    # because browsers send it. A client that omits it entirely (curl, a
+    # server-to-server caller) is not subject to the allowlist check.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server              => $server,
+        origin_allow        => ['https://trusted.example.com'],
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'server/discover',
+        'Content'              => encode_json(_build_envelope(id => 1)),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK with no Origin header, despite allowlist');
+};
+
 subtest 'empty origin_allow permits any origin' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -381,7 +393,6 @@ subtest 'x-mcp-header parity passes when header matches body' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -408,7 +419,6 @@ subtest 'x-mcp-header mismatch returns 400 -32020' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -440,7 +450,6 @@ subtest 'x-mcp-header parity with base64 UTF-8 value matches body' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -479,7 +488,6 @@ subtest 'x-mcp-header argument not in body returns 400 -32020' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -506,7 +514,6 @@ subtest 'GET on /mcp returns 405' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -517,11 +524,38 @@ subtest 'GET on /mcp returns 405' => sub {
     is($res->header('Allow'), 'POST', 'Allow: POST');
 };
 
+subtest 'DELETE on /mcp returns 405' => sub {
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = DELETE('/mcp');
+    my $res = $test->request($req);
+
+    is($res->code, 405, '405 Method Not Allowed');
+    is($res->header('Allow'), 'POST', 'Allow: POST');
+};
+
+subtest 'PUT on /mcp returns 405' => sub {
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = PUT('/mcp', 'Content-Type' => 'application/json', 'Content' => '{}');
+    my $res = $test->request($req);
+
+    is($res->code, 405, '405 Method Not Allowed');
+    is($res->header('Allow'), 'POST', 'Allow: POST');
+};
+
 subtest 'POST with wrong Content-Type returns -32700' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -546,7 +580,6 @@ subtest 'POST with invalid JSON body returns -32700' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -566,7 +599,6 @@ subtest 'POST to unknown path returns 404' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 
@@ -579,12 +611,17 @@ subtest 'POST to unknown path returns 404' => sub {
     is($res->code, 404, '404 Not Found');
 };
 
-subtest 'subscriptions/listen emits SSE acknowledgement event' => sub {
+subtest 'subscriptions/listen returns -32601 Method not found' => sub {
+    # subscriptions/listen was removed: there is no server->client push
+    # channel to deliver it in this version, so it falls through handle()'s
+    # normal dispatch and comes back as a plain JSON-RPC -32601, the same
+    # answer any other unknown method gets — not an SSE acknowledgement.
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
+    my $test = Plack::Test->create( $t->to_app );
+
     my $envelope = _build_envelope(
         id     => 'sub-1',
         method => 'subscriptions/listen',
@@ -599,48 +636,23 @@ subtest 'subscriptions/listen emits SSE acknowledgement event' => sub {
         },
     );
 
-    my $responder = $t->_handle_subscriptions_listen({}, $envelope);
-    ok($responder, 'responder returned');
-
-    my $state = { status => undef, headers => undef, };
-    my $recorder = _RecorderWriter->new;
-    my $close_called = 0;
-    my $returned = $responder->(sub {
-        my ($writer_cb) = @_;
-        $state->{status}  = $writer_cb->[0];
-        $state->{headers} = $writer_cb->[1];
-        return _FakeWriter->new(
-            recorder => $recorder,
-            on_close => sub {
-                $close_called = 1;
-                $recorder->close;
-                return;
-            },
-        );
-    });
-    is($state->{status}, 200, 'status 200');
-    is($state->{headers}[0], 'Content-Type', 'Content-Type header');
-    is($state->{headers}[1], 'text/event-stream', 'sse content-type');
-    is($state->{headers}[2], 'X-Accel-Buffering', 'X-Accel-Buffering header');
-    is($state->{headers}[3], 'no', 'X-Accel-Buffering: no');
-
-    my $joined = join '', @{ $recorder->{chunks} };
-    like($joined, qr/^data: \{/m, 'starts with data: payload');
-    like($joined, qr/\n\n\z/, 'event terminated with blank line');
-
-    my ($data_line) = $joined =~ m{^data: (.*)$}m;
-    my $payload = _decode_ok($data_line);
-    is(
-        $payload->{method},
-        'notifications/subscriptions/acknowledged',
-        'ack notification method',
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'subscriptions/listen',
+        'Content'              => encode_json($envelope),
     );
-    is(
-        $payload->{params}{_meta}{'io.modelcontextprotocol/subscriptionId'},
-        'sub-1',
-        'subscriptionId in _meta',
-    );
-    is($close_called, 1, 'writer closed by keepalive_interval=0 (no keepalive loop)');
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK (JSON-RPC error, not an HTTP error)');
+    is($res->content_type, 'application/json', 'plain JSON, not SSE');
+
+    my $body = _decode_ok($res->content);
+    is($body->{id}, 'sub-1', 'id echoed back');
+    ok(exists $body->{error}, 'error field present');
+    is($body->{error}{code}, -32601, 'JSON-RPC error -32601 Method not found');
 };
 
 subtest 'configure defaults are loopback + 8080 + /mcp' => sub {
@@ -648,28 +660,71 @@ subtest 'configure defaults are loopback + 8080 + /mcp' => sub {
     is($t->host, '127.0.0.1', 'default host loopback');
     is($t->port, 8080, 'default port 8080');
     is($t->path, '/mcp', 'default path /mcp');
-    is($t->keepalive_interval, 15, 'default keepalive 15s');
     is(scalar @{ $t->origin_allow }, 0, 'empty origin_allow');
 };
 
 subtest 'non-loopback host warns (does not error)' => sub {
+    # The warn lives in listen(), not in the constructor, so this must
+    # actually call listen() to exercise the warn logic — but listen() also
+    # binds a real socket via HTTP::Server::PSGI and blocks in ->run, which
+    # the hard "no network, no spawned process" rule forbids. Locally mock
+    # HTTP::Server::PSGI's new/run so listen() runs its warn logic and
+    # returns without ever touching a socket.
+    require HTTP::Server::PSGI;
+    local *HTTP::Server::PSGI::new = sub { bless {}, 'HTTP::Server::PSGI' };
+    local *HTTP::Server::PSGI::run = sub { return };
+
     my $server = _make_server;
     my @warn;
     local $SIG{__WARN__} = sub { push @warn, shift };
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
         host               => '0.0.0.0',
-        keepalive_interval => 0,
     );
-    is($t->host, '0.0.0.0', 'host retained');
-    ok(1, 'no exception during construction');
+    $t->listen;
+
+    is(scalar @warn, 1, 'exactly one warning');
+    like($warn[0], qr/non-loopback/, 'warning mentions non-loopback');
+};
+
+subtest 'loopback host (127.0.0.1) does not warn' => sub {
+    require HTTP::Server::PSGI;
+    local *HTTP::Server::PSGI::new = sub { bless {}, 'HTTP::Server::PSGI' };
+    local *HTTP::Server::PSGI::run = sub { return };
+
+    my $server = _make_server;
+    my @warn;
+    local $SIG{__WARN__} = sub { push @warn, shift };
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+        host               => '127.0.0.1',
+    );
+    $t->listen;
+
+    is(scalar @warn, 0, 'no warning for loopback host');
+};
+
+subtest 'allow_external_bind silences the non-loopback warning' => sub {
+    require HTTP::Server::PSGI;
+    local *HTTP::Server::PSGI::new = sub { bless {}, 'HTTP::Server::PSGI' };
+    local *HTTP::Server::PSGI::run = sub { return };
+
+    my $server = _make_server;
+    my @warn;
+    local $SIG{__WARN__} = sub { push @warn, shift };
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+        host               => '0.0.0.0',
+    );
+    $t->listen( allow_external_bind => 1 );
+
+    is(scalar @warn, 0, 'no warning when allow_external_bind is set');
 };
 
 subtest 'x-mcp-header argument lookup is case-insensitive' => sub {
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
-        keepalive_interval => 0,
     );
     my $test = Plack::Test->create( $t->to_app );
 

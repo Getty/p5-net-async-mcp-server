@@ -89,7 +89,7 @@ Returns a hashref with C<name> and C<version> keys for the MCP protocol.
 
 sub server_capabilities {
     my ( $self ) = @_;
-    return $self->{server_capabilities} // $self->_build_capabilities;
+    return $self->_build_capabilities;
 }
 
 =method server_capabilities
@@ -100,13 +100,14 @@ Returns the server capabilities hashref.
 
 sub _build_capabilities {
     my ( $self ) = @_;
-    return { tools => {} };
+    my %cap = ( tools => {} );
+    $cap{resources} = {} if @{ $self->resources };
+    $cap{prompts}   = {} if @{ $self->prompts };
+    return \%cap;
 }
 
 async sub discover {
     my ( $self ) = @_;
-
-    $self->{server_capabilities} //= $self->_build_capabilities;
 
     return {
         resultType        => 'complete',
@@ -119,9 +120,12 @@ async sub discover {
 
 =method discover
 
-Handles the C<server/discover> RPC. Returns the server's supported protocol
-versions, capabilities, identity (in C<_meta.io.modelcontextprotocol/serverInfo>),
-and caching hints.
+Handles the C<server/discover> RPC. Returns a Future that resolves to a
+hashref of the server's supported protocol versions, capabilities, and
+caching hints: C<< { resultType, supportedVersions, capabilities, ttlMs,
+cacheScope } >>. The C<_meta.io.modelcontextprotocol/serverInfo> entry seen
+on the wire is not part of this result — it is added afterwards, by
+C<_jsonrpc_response>, to every response C<handle> sends.
 
 =cut
 
@@ -174,14 +178,16 @@ sub _tool_wire_shape {
         description => $tool->{description},
         inputSchema => $tool->{inputSchema},
     );
-    $t{title} = $tool->{title} if defined $tool->{title};
+    $t{title}        = $tool->{title}        if defined $tool->{title};
+    $t{annotations}  = $tool->{annotations}  if defined $tool->{annotations};
+    $t{outputSchema} = $tool->{outputSchema} if defined $tool->{outputSchema};
     return \%t;
 }
 
 =method list_tools
 
-Returns ArrayRef of tool definitions in wire shape (C<inputSchema>, not
-C<input_schema>).
+Returns a Future that resolves to an ArrayRef of tool definitions in wire
+shape (C<inputSchema>, not C<input_schema>).
 
 =cut
 
@@ -192,7 +198,9 @@ async sub call_tool {
     die "No tool registered: $name" unless $tool;
 
     if (my $code = $tool->{code}) {
-        return $code->($arguments);
+        my $result = $code->($arguments);
+        $result = await $result if ref $result eq 'Future';
+        return $result;
     }
 
     die "Tool '$name' has no implementation";
@@ -209,7 +217,8 @@ sub _find_tool {
 =method call_tool($name, $arguments)
 
 Called when a client invokes a tool. Subclasses should override to provide
-tool implementations. The return value is wrapped by the dispatch layer:
+tool implementations. Returns a Future that resolves to the tool's return
+value, which the dispatch layer then wraps:
 
 =over
 
@@ -223,6 +232,14 @@ C<text> content block inside a C<complete> result.
 A hashref that already carries a C<resultType> (e.g. C<input_required> for
 MRTR) is passed through unchanged.
 
+=item *
+
+A hashref carrying a C<content> arrayref and/or a C<structuredContent> key
+(but no C<resultType>) is passed through verbatim, wrapped in a C<complete>
+result. This lets a tool return its own content blocks — images, multiple
+text blocks, structured output — instead of the single stringified text
+block the default wrapping produces.
+
 =back
 
 To signal that a tool needs more input from the client, return a hashref
@@ -233,6 +250,215 @@ shaped like:
         inputRequests => { ... },
         requestState  => '...',   # optional, opaque
     }
+
+=cut
+
+sub resources {
+    my ( $self ) = @_;
+    return $self->{resources} // [];
+}
+
+=method resources
+
+Returns ArrayRef of registered resource definitions (internal storage shape).
+
+=cut
+
+sub register_resource {
+    my ( $self, %resource ) = @_;
+    die "register_resource requires 'uri'"  unless defined $resource{uri};
+    die "register_resource requires 'name'" unless defined $resource{name};
+
+    $self->{resources} //= [];
+    push @{ $self->{resources} }, \%resource;
+}
+
+=method register_resource(%resource)
+
+Registers a resource. Expects C<uri> and C<name>, an optional C<mimeType>,
+C<description> and C<title>, and a C<code> reference invoked with the resource
+URI when the resource is read.
+
+=cut
+
+async sub list_resources {
+    my ( $self ) = @_;
+    return [ map { $self->_resource_wire_shape($_) } @{ $self->{resources} // [] } ];
+}
+
+sub _resource_wire_shape {
+    my ( $self, $resource ) = @_;
+    my %r = (
+        uri  => $resource->{uri},
+        name => $resource->{name},
+    );
+    $r{mimeType}    = $resource->{mimeType}    if defined $resource->{mimeType};
+    $r{description} = $resource->{description} if defined $resource->{description};
+    $r{title}       = $resource->{title}       if defined $resource->{title};
+    return \%r;
+}
+
+=method list_resources
+
+Returns a Future that resolves to an ArrayRef of resource definitions in wire
+shape (C<uri>, C<name>, and the optional C<mimeType>, C<description>,
+C<title>).
+
+=cut
+
+async sub read_resource {
+    my ( $self, $uri ) = @_;
+
+    my $resource = $self->_find_resource($uri);
+    die "No resource registered: $uri" unless $resource;
+
+    my $result;
+    if ( my $code = $resource->{code} ) {
+        $result = $code->($uri);
+        $result = await $result if ref $result eq 'Future';
+    }
+    else {
+        die "Resource '$uri' has no implementation";
+    }
+
+    # A resource may return its own result hashref already carrying contents
+    # blocks (multiple parts, a blob, an explicit mimeType). Pass it through.
+    return $result
+        if ref $result eq 'HASH' && ref $result->{contents} eq 'ARRAY';
+
+    # Default wrapping: a bare scalar becomes a single text content block,
+    # tagged with the resource's declared mimeType when it has one.
+    my $content = {
+        uri  => $uri,
+        text => ( defined $result ? "$result" : '' ),
+    };
+    $content->{mimeType} = $resource->{mimeType} if defined $resource->{mimeType};
+
+    return { contents => [ $content ] };
+}
+
+sub _find_resource {
+    my ( $self, $uri ) = @_;
+    for my $resource ( @{ $self->{resources} // [] } ) {
+        return $resource if $resource->{uri} eq $uri;
+    }
+    return undef;
+}
+
+=method read_resource($uri)
+
+Called when a client reads a resource. Looks up C<$uri> in the resource
+registry and invokes its C<code> reference with the URI. Returns a Future that
+resolves to a hashref of the shape C<< { contents => [ { uri, mimeType?, text } ] } >>.
+
+A resource whose C<code> returns a hashref already carrying a C<contents>
+arrayref is passed through verbatim; any other return value is stringified
+into a single text content block tagged with the resource's C<mimeType>.
+
+=cut
+
+sub prompts {
+    my ( $self ) = @_;
+    return $self->{prompts} // [];
+}
+
+=method prompts
+
+Returns ArrayRef of registered prompt definitions (internal storage shape).
+
+=cut
+
+sub register_prompt {
+    my ( $self, %prompt ) = @_;
+    die "register_prompt requires 'name'" unless defined $prompt{name};
+
+    $self->{prompts} //= [];
+    push @{ $self->{prompts} }, \%prompt;
+}
+
+=method register_prompt(%prompt)
+
+Registers a prompt. Expects C<name>, optional C<title>, C<description> and an
+C<arguments> ArrayRef, and a C<code> reference invoked with the request
+arguments when the prompt is fetched.
+
+=cut
+
+async sub list_prompts {
+    my ( $self ) = @_;
+    return [ map { $self->_prompt_wire_shape($_) } @{ $self->{prompts} // [] } ];
+}
+
+sub _prompt_wire_shape {
+    my ( $self, $prompt ) = @_;
+    my %p = (
+        name      => $prompt->{name},
+        arguments => $prompt->{arguments} // [],
+    );
+    $p{title}       = $prompt->{title}       if defined $prompt->{title};
+    $p{description} = $prompt->{description} if defined $prompt->{description};
+    return \%p;
+}
+
+=method list_prompts
+
+Returns a Future that resolves to an ArrayRef of prompt definitions in wire
+shape (C<name>, C<arguments>, and the optional C<title>, C<description>).
+
+=cut
+
+async sub get_prompt {
+    my ( $self, $name, $arguments ) = @_;
+
+    my $prompt = $self->_find_prompt($name);
+    die "No prompt registered: $name" unless $prompt;
+
+    my $result;
+    if ( my $code = $prompt->{code} ) {
+        $result = $code->($arguments);
+        $result = await $result if ref $result eq 'Future';
+    }
+    else {
+        die "Prompt '$name' has no implementation";
+    }
+
+    # A prompt may return its own result hashref already carrying a messages
+    # arrayref (and an optional description). Pass it through verbatim.
+    return $result
+        if ref $result eq 'HASH' && ref $result->{messages} eq 'ARRAY';
+
+    # Default wrapping: a bare scalar becomes a single user text message.
+    return {
+        messages => [
+            {
+                role    => 'user',
+                content => {
+                    type => 'text',
+                    text => ( defined $result ? "$result" : '' ),
+                },
+            },
+        ],
+    };
+}
+
+sub _find_prompt {
+    my ( $self, $name ) = @_;
+    for my $prompt ( @{ $self->{prompts} // [] } ) {
+        return $prompt if $prompt->{name} eq $name;
+    }
+    return undef;
+}
+
+=method get_prompt($name, $arguments)
+
+Called when a client fetches a prompt. Looks up C<$name> in the prompt
+registry and invokes its C<code> reference with C<$arguments>. Returns a
+Future that resolves to a hashref of the shape
+C<< { description?, messages => [ { role, content => { type => 'text', text } } ] } >>.
+
+A prompt whose C<code> returns a hashref already carrying a C<messages>
+arrayref is passed through verbatim; any other return value is stringified
+into a single C<user> text message.
 
 =cut
 
@@ -264,6 +490,18 @@ sub handle {
         }
         elsif ( $method eq 'tools/call' ) {
             return $self->_handle_tools_call( $request->{params} // {}, $id );
+        }
+        elsif ( $method eq 'resources/list' ) {
+            return $self->_handle_resources_list($id);
+        }
+        elsif ( $method eq 'resources/read' ) {
+            return $self->_handle_resources_read( $request->{params} // {}, $id );
+        }
+        elsif ( $method eq 'prompts/list' ) {
+            return $self->_handle_prompts_list($id);
+        }
+        elsif ( $method eq 'prompts/get' ) {
+            return $self->_handle_prompts_get( $request->{params} // {}, $id );
         }
 
         return _jsonrpc_error( -32601, "Method '$method' not found", $id );
@@ -339,6 +577,26 @@ C<tools/call> looks up C<params.name> in the tool registry (unregistered
 name: C<-32602>) and dispatches to C<call_tool> with C<params.arguments>;
 see the C<call_tool> method above for how a tool's return value or
 exception becomes the result.
+
+=item *
+
+C<resources/list> dispatches to C<list_resources>.
+
+=item *
+
+C<resources/read> looks up C<params.uri> in the resource registry
+(unregistered URI: C<-32602>) and dispatches to C<read_resource> with the
+URI.
+
+=item *
+
+C<prompts/list> dispatches to C<list_prompts>.
+
+=item *
+
+C<prompts/get> looks up C<params.name> in the prompt registry (unregistered
+name: C<-32602>) and dispatches to C<get_prompt> with C<params.name> and
+C<params.arguments>.
 
 =item *
 
@@ -462,6 +720,15 @@ sub _handle_tools_call {
         return $self->_jsonrpc_response( $result, $id );
     }
 
+    # Rich content: a tool may return a hashref carrying its own content
+    # blocks and/or structuredContent (without a resultType). Pass it
+    # through verbatim; _jsonrpc_response fills in resultType => 'complete'.
+    if ( ref $result eq 'HASH'
+        && ( ref $result->{content} eq 'ARRAY'
+            || exists $result->{structuredContent} ) ) {
+        return $self->_jsonrpc_response( $result, $id );
+    }
+
     # Default wrapping: a tool's plain return value becomes a text content
     # block inside a complete result. Scalars are stringified; refs are
     # JSON-encoded so the tool author can return any JSON-shaped data
@@ -477,6 +744,93 @@ sub _handle_tools_call {
         },
         $id,
     );
+}
+
+sub _handle_resources_list {
+    my ( $self, $id ) = @_;
+
+    my $resources = $self->list_resources->get;
+    return $self->_jsonrpc_response(
+        {
+            resultType => 'complete',
+            resources  => $resources,
+        },
+        $id,
+    );
+}
+
+sub _handle_resources_read {
+    my ( $self, $params, $id ) = @_;
+
+    my $uri = $params->{uri} // '';
+
+    # Protocol error: unknown resource. Routed through JSON-RPC -32602.
+    my $resource = $self->_find_resource($uri);
+    unless ($resource) {
+        return _jsonrpc_error(
+            -32602,
+            "Invalid params: unknown resource '$uri'",
+            $id,
+        );
+    }
+
+    my $result;
+    eval {
+        $result = $self->read_resource($uri)->get;
+        1;
+    } or do {
+        # Resource execution error — a dying code ref or a registered-but-
+        # codeless resource. Unlike tools/call, which routes tool execution
+        # failures into isError content blocks so the model can self-correct,
+        # a resource read failure is a server-side internal error: -32603.
+        return _jsonrpc_error( -32603, "Internal error: $@", $id );
+    };
+
+    return $self->_jsonrpc_response( $result, $id );
+}
+
+sub _handle_prompts_list {
+    my ( $self, $id ) = @_;
+
+    my $prompts = $self->list_prompts->get;
+    return $self->_jsonrpc_response(
+        {
+            resultType => 'complete',
+            prompts    => $prompts,
+        },
+        $id,
+    );
+}
+
+sub _handle_prompts_get {
+    my ( $self, $params, $id ) = @_;
+
+    my $name = $params->{name}      // '';
+    my $args = $params->{arguments} // {};
+
+    # Protocol error: unknown prompt. Routed through JSON-RPC -32602.
+    my $prompt = $self->_find_prompt($name);
+    unless ($prompt) {
+        return _jsonrpc_error(
+            -32602,
+            "Invalid params: unknown prompt '$name'",
+            $id,
+        );
+    }
+
+    my $result;
+    eval {
+        $result = $self->get_prompt($name, $args)->get;
+        1;
+    } or do {
+        # Prompt execution error — a dying code ref or a registered-but-
+        # codeless prompt. Unlike tools/call, which routes tool execution
+        # failures into isError content blocks so the model can self-correct,
+        # a prompt fetch failure is a server-side internal error: -32603.
+        return _jsonrpc_error( -32603, "Internal error: $@", $id );
+    };
+
+    return $self->_jsonrpc_response( $result, $id );
 }
 
 sub _jsonrpc_error {
@@ -503,6 +857,8 @@ sub _jsonrpc_response {
 
 =head1 SEE ALSO
 
-L<Net::Async::MCP::Server::Transport::Stdio>, L<IO::Async::Notifier>, L<Future::AsyncAwait>.
+L<Net::Async::MCP::Server::Transport::Stdio>,
+L<Net::Async::MCP::Server::Transport::StreamableHTTP>, L<IO::Async::Notifier>,
+L<Future::AsyncAwait>.
 
 =cut

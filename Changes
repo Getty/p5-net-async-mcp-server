@@ -20,11 +20,37 @@ Revision history for Net-Async-MCP-Server
   - tools/call wraps a tool's plain return value in a text content block;
     tool execution errors become isError: true results (the model can
     self-correct) while protocol-level errors (unknown tool) return a
-    JSON-RPC -32602.
+    JSON-RPC -32602. A tool whose code returns a Future is awaited before
+    the wrapping.
   - MRTR-ready call_tool: a tool that returns a hashref with
     resultType "input_required" and inputRequests / requestState is passed
     through unchanged, so multi round-trip requests work without further
     changes when a tool needs them.
+  - tools/call: a tool may return a hashref carrying its own content arrayref
+    and/or structuredContent (without a resultType) and have it passed through
+    verbatim, so tools can emit image / audio / resource-link blocks and
+    structured output instead of only a single text block.
+  - tools/list now carries a registered tool's annotations and outputSchema
+    through to the wire when register_tool was given them; both were silently
+    dropped before.
+  - Resources: register_resource / resources / list_resources / read_resource,
+    with resources/list and resources/read dispatch. read_resource wraps a
+    bare return in a { contents => [ { uri, mimeType?, text } ] } block, or
+    passes through a hashref already carrying a contents arrayref; an unknown
+    uri returns -32602. A code ref returning a Future is awaited before the
+    wrapping; a dying code ref or a registered-but-codeless resource returns
+    -32603 Internal error. Advertised in discover capabilities only when at
+    least one resource is registered; capabilities are rebuilt per discover,
+    so resources registered after the first discover are advertised too.
+  - Prompts: register_prompt / prompts / list_prompts / get_prompt, with
+    prompts/list and prompts/get dispatch. get_prompt wraps a bare return in a
+    single user text message, or passes through a hashref already carrying a
+    messages arrayref; an unknown name returns -32602. A code ref returning a
+    Future is awaited before the wrapping; a dying code ref or a
+    registered-but-codeless prompt returns -32603 Internal error. Advertised
+    only when at least one prompt is registered; capabilities are rebuilt per
+    discover, so prompts registered after the first discover are advertised
+    too.
   - Server::configure now calls SUPER::configure, so unknown parameters
     surface through IO::Async::Notifier instead of being silently dropped.
   - register_tool now requires an inputSchema; the legacy input_schema key
@@ -62,8 +88,11 @@ Revision history for Net-Async-MCP-Server
     Mcp-Param-{Name}) against the JSON-RPC body, and answers each request
     as application/json or text/event-stream. Notifications return 202
     Accepted; header/body divergences return JSON-RPC -32020 HeaderMismatch.
-    subscriptions/listen keeps the stream open with periodic :keepalive
-    comments. New runtime dep on Plack; new test file t/03-streamable-http.t.
+    New runtime dep on Plack; new test file t/03-streamable-http.t.
+  - subscriptions/listen is not implemented in this release: it returns -32601
+    in both transports, so Stdio and Streamable HTTP agree. Real server->client
+    push delivery (subscription change notifications, logging, progress) is a
+    future ticket.
 
 0.001     2026-04-26 03:50:13Z
 

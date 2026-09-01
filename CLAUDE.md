@@ -92,4 +92,4 @@ Known gaps in the current implementation — flag before "fixing" — are listed
 ## PodWeaver
 
 `[@Author::GETTY]` conventions: inline `=method`, `=attr`, `=seealso`. No manual
-NAME/VERSION/AUTHOR sections. Full rules: skill `perl-release-author-getty`.
+NAME/VERSION/AUTHOR sections. Full rules: skill `getty-perl-release-author-getty`.

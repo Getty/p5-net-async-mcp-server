@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-01T05:27:45Z
+created: 2026-09-01T05:00:15Z
+id: 19
+priority: high
+started: 2026-09-01T05:03:52Z
+status: done
+tags:
+- feature
+- protocol
+title: Implement resources (resources/list, resources/read)
+updated: 2026-09-01T05:27:45Z
+---
+
+MCP 2026-07-28: add resource registry mirroring the tool registry. register_resource(uri,name,mimeType?,description?,code), _find_resource, async list_resources -> [{uri,name,mimeType?,description?,title?}], async read_resource(uri) -> {contents=>[{uri,mimeType,text|blob}]}. handle() branches resources/list and resources/read (unknown uri -> -32602, like tools/call). Advertise resources=>{} in _build_capabilities ONLY when >=1 registered. HTTP transport already mirrors params.uri into Mcp-Name.
+
+Resource registry: register_resource/resources/_find_resource, async list_resources + read_resource, _resource_wire_shape, handle() branches resources/list and resources/read (unknown uri -> -32602), _build_capabilities advertises resources=>{} only when >=1 registered. POD added. 56 tests green.

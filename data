@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-09-01T05:28:20Z
+created: 2026-09-01T05:00:42Z
+id: 23
+priority: high
+started: 2026-09-01T05:06:22Z
+status: done
+tags:
+- bug
+- protocol
+- conformance
+title: 'P0: subscriptions/listen acks a subscription never delivered; transports diverge'
+updated: 2026-09-01T05:28:20Z
+---
+
+HTTP _handle_subscriptions_listen writes notifications/subscriptions/acknowledged + keepalives, but no *ListChanged is ever emitted and discover advertises no listChanged. Stdio would -32601 the same method -> transports disagree. For 0.002 make it HONEST + CONSISTENT: do not advertise a capability the server cannot honor, and do not leave a client waiting on an ack that never delivers. Real server->client push delivery is deferred to the push-channel ticket.
+
+Removed subscriptions/listen special-case from StreamableHTTP _handle_request (now falls through to server->handle() -> -32601, consistent with Stdio) and deleted the _handle_subscriptions_listen helper. No listChanged/subscription capability advertised (none existed). One-line comment points to karr #24 for real push delivery. EXPECTED RED TEST: t/03-streamable-http.t subtest #18 'subscriptions/listen emits SSE acknowledgement event' (lines ~586-644) calls the removed helper directly and now dies; test-writer must rewrite it to assert the -32601 fall-through. Verified end-to-end that a subscriptions/listen POST returns JSON-RPC -32601.
+
+keepalive_interval removal NOT done: lib-dead after subscription removal, but still referenced 22x in t/03 (passed to new/configure in ~20 subtests + accessor asserted line 651). Removing it croaks unknown-param in those subtests and breaks line 651 => ~20 NEW failures in test code I cannot edit. Left in place per leave-and-tell. Sequence: test-writer strips refs (same pass as subtest 18), then worker deletes DEFAULT_KEEPALIVE, configure entry+default, accessor, and POD.
+
+keepalive_interval REMOVED (coordinator-authorized, lib + tests one pass). lib/.../StreamableHTTP.pm: deleted $DEFAULT_KEEPALIVE var, the keepalive_interval configure qw() entry, the //= default line, the keepalive_interval accessor sub, and its =method POD block. t/03-streamable-http.t: stripped all 20 'keepalive_interval => 0' constructor args (both whitespace variants) and the line-651 default assertion is($t->keepalive_interval,15). lib grep now 0 hits. ONE keepalive string reference intentionally remains at t/03 line 625 (is($close_called,1,'...keepalive_interval=0...')) inside subtest #18's body, left for the test-writer to remove when they rewrite that subtest to assert -32601. prove -l t/: 55/56, single expected red is subtest #18 only. No new failures.

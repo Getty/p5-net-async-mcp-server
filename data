@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-01T05:27:54Z
+created: 2026-09-01T05:00:20Z
+id: 20
+priority: high
+started: 2026-09-01T05:05:18Z
+status: done
+tags:
+- feature
+- protocol
+title: Implement prompts (prompts/list, prompts/get)
+updated: 2026-09-01T05:27:54Z
+---
+
+Mirror of resources. register_prompt(name,description,arguments=>[...],code); prompts/list -> {prompts=>[{name,title?,description?,arguments}]}; prompts/get reads params.name+params.arguments -> {description?,messages=>[{role,content=>{type=>text,text}}]}. Advertise prompts=>{} only when non-empty. HTTP transport already mirrors prompts/get name.
+
+Prompt registry mirroring resources: register_prompt/prompts/_find_prompt, async list_prompts + get_prompt, _prompt_wire_shape, handle() branches prompts/list and prompts/get (unknown name -> -32602), _build_capabilities advertises prompts=>{} only when >=1 registered. get_prompt wraps bare scalar as a single user text message; passes through a hashref with messages arrayref. POD added. 56 tests green.

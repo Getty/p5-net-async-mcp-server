@@ -1,0 +1,47 @@
+---
+class: standard
+completed: 2026-09-01T20:19:23Z
+created: 2026-09-01T19:49:01Z
+id: 29
+priority: high
+started: 2026-09-01T20:19:23Z
+status: done
+tags:
+- server
+- spec
+- errors
+title: 'resources/read + prompts/get: sterbender Code entkommt handle() statt -32603'
+updated: 2026-09-01T20:19:23Z
+---
+
+## Befund (reproduziert)
+
+`_handle_resources_read` und `_handle_prompts_get` in lib/Net/Async/MCP/Server.pm rufen `->get` ohne `eval`. Ein `die` im `code`-Ref propagiert als Exception aus `handle()`.
+
+- Stdio: `handle_requests` fängt es nur, um den Stream zu entfernen, und wirft weiter — die ganze Leseschleife stirbt.
+- Streamable HTTP: HTTP::Server::PSGI antwortet 500 ohne JSON-RPC-Body.
+
+Repro: `register_resource(uri => 'x://a', name => 'a', code => sub { die "boom\n" })`, dann `resources/read` → `handle()` stirbt mit "boom". Prompts identisch.
+
+Tools sind dagegen in `_handle_tools_call` per `eval` gefangen (isError-Result). Der Kommentar "mirroring the unknown-tool handling" in beiden Handlern stimmt also nur für den Unknown-Fall.
+
+## Spec
+
+server/resources, Error Handling: "Servers SHOULD return -32603 for internal errors."
+server/prompts, Error Handling: "Internal errors: -32603 (Internal error)".
+
+## Anweisung
+
+1. In `_handle_resources_read` und `_handle_prompts_get` den `->get`-Aufruf in `eval` legen; bei Fehler `_jsonrpc_error(-32603, "Internal error: $msg", $id)` zurückgeben (`$msg` = `$@` ohne trailing newline). Kein isError-Wrapping — das ist nur für tools/call definiert.
+2. Kommentar in Stdio.pm `handle_requests` ("A tool that dies still propagates out of handle()") korrigieren: nach diesem Ticket propagiert nichts mehr aus `handle()`.
+3. Changes-Eintrag unter {{$NEXT}}.
+
+## Tests (mcp-server-test-writer, t/05)
+
+- Resource-Code stirbt → `error.code == -32603`, `id` gesetzt, Message enthält den die-Text.
+- Prompt-Code stirbt → dito.
+- t/04: nach einem sterbenden resources/read beantwortet der Stdio-Transport die nächste Zeile noch (Loop überlebt).
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+Fixed in 0afdeb5: _handle_resources_read/_handle_prompts_get wrappen den ->get jetzt in eval; sterbender Code und codelose Resources/Prompts werden als -32603 Internal error gemappt statt aus handle() zu entkommen. Regressionstests in t/05.

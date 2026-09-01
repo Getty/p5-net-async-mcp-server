@@ -1,0 +1,39 @@
+---
+class: standard
+completed: 2026-09-01T20:19:50Z
+created: 2026-09-01T19:50:58Z
+id: 31
+priority: medium
+started: 2026-09-01T20:19:50Z
+status: done
+tags:
+- server
+- spec
+- capabilities
+title: discover cached die Capabilities – spät registrierte Resources/Prompts werden
+  nie beworben
+updated: 2026-09-01T20:19:50Z
+---
+
+## Befund (reproduziert)
+
+`discover` setzt `$self->{server_capabilities} //= $self->_build_capabilities`, und `server_capabilities` liest diesen Cache zuerst. Seit `_build_capabilities` von der Registry abhängt (resources/prompts nur bei >= 1 Eintrag), friert der erste `server/discover` das Ergebnis ein.
+
+Repro: `server/discover` → `register_resource(...)` → `server/discover`: `capabilities.resources` fehlt.
+
+## Spec
+
+server/resources: "Servers that support resources MUST declare the resources capability". Prompts analog.
+
+## Anweisung
+
+- Die `//=`-Zeile in `discover` streichen. `server_capabilities` gibt `_build_capabilities` direkt zurück; das Feld `$self->{server_capabilities}` wird nirgends sonst gesetzt und entfällt komplett. Kein Cache — der Aufbau ist drei Hash-Zugriffe.
+- Changes-Eintrag.
+
+## Tests (t/05)
+
+- discover, dann register_resource + register_prompt, dann discover erneut → beide Capabilities vorhanden.
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+Fixed in 0afdeb5: server_capabilities baut jetzt pro Aufruf frisch (Cache entfernt), _build_capabilities nutzt die Accessoren resources/prompts. Spät registrierte Resources/Prompts werden beim nächsten discover beworben. Regressionstest in t/05.

@@ -1,0 +1,41 @@
+---
+class: standard
+completed: 2026-09-01T20:19:36Z
+created: 2026-09-01T19:50:53Z
+id: 30
+priority: high
+started: 2026-09-01T20:19:36Z
+status: done
+tags:
+- server
+- async
+title: 'tools/call: Tool, das ein Future zurückgibt, lässt handle() sterben'
+updated: 2026-09-01T20:19:36Z
+---
+
+## Befund (reproduziert)
+
+`call_tool` gibt `$code->($arguments)` zurück. Liefert der Tool-Code ein Future (die naheliegendste Implementierung in einem IO::Async-Server), landet das Future-Objekt als `$result` in `_handle_tools_call`. Dort greift keiner der Passthrough-Zweige, `ref $result` ist wahr, und `encode_json($result)` stirbt AUSSERHALB des eval:
+
+    encountered object 'Future=HASH(...)', but neither allow_blessed, convert_blessed ...
+
+Die Exception verlässt `handle()` (Stdio-Loop stirbt, HTTP 500). Repro: `code => sub { Future->done('x') }`.
+
+## Anweisung
+
+1. In `call_tool` (Server.pm): `my $r = $code->($arguments); return await $r if blessed $r && $r->isa('Future'); return $r;` — `blessed` aus Scalar::Util importieren. Ein `Future->fail(...)` wird damit im eval von `_handle_tools_call` zum isError-Result, genau wie ein `die`.
+2. Gleiches Muster in `read_resource` und `get_prompt` (Fehler dort werden nach k29 zu -32603).
+3. POD von `call_tool`: dokumentieren, dass ein zurückgegebenes Future awaited wird. Einschränkung ehrlich nennen: `handle()` ist synchron und ruft `->get`; ein noch pending Future muss ein IO::Async::Future im laufenden Loop sein, sonst stirbt `->get`. Das echte async-`handle()` ist ein eigenes Thema (siehe k17/k18).
+4. Changes-Eintrag.
+
+## Tests (t/02)
+
+- `Future->done('hi')` → text 'hi'.
+- `Future->done({ a => 1 })` → JSON-Text wie beim Hashref-Return.
+- `Future->done({ content => [...] })` → Passthrough.
+- `Future->fail("nope\n")` → isError-Result mit "nope".
+- Resource/Prompt-Code, der `Future->done(...)` liefert → normales Wrapping.
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+Fixed in 0afdeb5: call_tool/read_resource/get_prompt awaiten ein von $code->(...) zurückgegebenes Future (ref eq 'Future') vor dem Default-Wrapping. Future->fail wird im eval von _handle_tools_call zum isError-Result, in resources/prompts zu -32603. Regressionstests in t/02 und t/05.

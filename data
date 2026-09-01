@@ -1,0 +1,43 @@
+---
+class: standard
+completed: 2026-09-01T05:28:29Z
+created: 2026-09-01T05:01:16Z
+id: 27
+priority: high
+started: 2026-09-01T05:15:34Z
+status: done
+tags:
+- docs
+title: POD + README conformance fixes
+updated: 2026-09-01T05:28:29Z
+---
+
+Server.pm: async subs discover/list_tools/call_tool must say Returns a Future; discover POD misattributes _meta.serverInfo (injected by _jsonrpc_response); add StreamableHTTP to SEE ALSO. StreamableHTTP.pm: _handle_request documented as if public (rename or note exception); document subscriptions/listen; DESCRIPTION overstates thin-wrapper (notifications + subscriptions bypass). README: license text says Artistic 2.0 but dist is Perl_5/dual GPL+Artistic-1.0 (ERROR), bad URL raudss.us.devel; false claim that POD marks Future methods; Error Codes list omits -32700/-32600. Plus document all NEW features (resources/prompts/rich content).
+
+test append
+
+POD + README pass complete over final code state (resources/prompts/rich content).
+
+Server.pm:
+- discover/list_tools/call_tool =method blocks now say 'Returns a Future that resolves to ...' (list_resources/read_resource/list_prompts/get_prompt already had this from the worker, verified correct)
+- discover's misattribution of _meta.serverInfo fixed: now says it is injected afterwards by _jsonrpc_response, not part of discover()'s own result
+- handle() method-mapping =over list extended with resources/list, resources/read, prompts/list, prompts/get (uri/name lookup + -32602 on unregistered, matching tools/call's pattern); verified error-code set (-32700/-32600/-32601/-32602/-32022) still accurate, unchanged
+- SEE ALSO now includes Transport::StreamableHTTP
+
+StreamableHTTP.pm:
+- _handle_request demoted from =method block to a plain comment (private sub, matches convention of other undocumented _-prefixed subs)
+- DESCRIPTION qualified: header checks only run for requests carrying an id; notifications skip them and go straight to handle() (spec does not define header reqs for notification POSTs)
+- confirmed no stale POD mentions of subscriptions/listen, keepalive, or notifications/subscriptions/acknowledged anywhere; those remain only as accurate non-POD code comments describing the current -32601 fallthrough, left untouched (out of POD-writer lane, and not stale)
+- Mcp-Name method list left as-is per instructions (already accurate)
+
+README.md (kept in lockstep with 0.002):
+- license section fixed: was falsely 'Artistic License version 2.0' + bogus URL raudss.us.devel -> now correctly states Perl_5 dual GPL-1+/Artistic-1.0 terms, URL https://raudssus.de/
+- Architecture section's Future-methods list extended to all 7 (discover, list_tools, call_tool, list_resources, read_resource, list_prompts, get_prompt) - claim is now true
+- Error Codes: added -32700 Parse error and -32600 Invalid Request
+- documented resources/prompts fully: new METHODS subsections (resources, register_resource, list_resources, read_resource, prompts, register_prompt, list_prompts, get_prompt), new MCP Protocol bullets, tools/call bullet extended to mention rich content (content array/structuredContent), handle() method-mapping prose and Future->get list extended
+- removed false 'subscriptions/listen keeps SSE open with :keepalive' claim from StreamableHTTP transport section (feature was removed); replaced with accurate one-event-then-close description; Mcp-Name bullet extended to resources/read + prompts/get
+- VERSION already read 0.002 in the file (not stale as the general CLAUDE.md note suggested)
+
+Verification: perl -c on all 3 modules clean; prove -l t/00-load.t passes; dzil build succeeds and PodWeaver weaves all =method blocks correctly (spot-checked woven output for discover/list_tools/call_tool/handle/_handle_request-absence). Did not touch t/*.t (test-writer's lane).
+
+POD + README pass done, verified via dzil build + prove -l t/00-load.t. See task notes for detail.

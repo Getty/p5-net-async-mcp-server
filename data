@@ -1,0 +1,52 @@
+---
+class: standard
+completed: 2026-09-09T09:23:57Z
+created: 2026-09-01T19:51:02Z
+id: 32
+priority: high
+started: 2026-09-09T09:14:31Z
+status: done
+tags:
+- http
+- spec
+title: 'StreamableHTTP: HTTP-Status für JSON-RPC-Fehler aus handle() – 400/404 statt
+  200'
+updated: 2026-09-09T09:23:57Z
+---
+
+## Befund (Probe mit Plack::Test)
+
+| Fall | Spec | Ist |
+|---|---|---|
+| unbekannte Methode (-32601) | 404 | 200 |
+| nicht unterstützte Version (-32022) | 400 | 200 |
+| `clientCapabilities` fehlt (-32602) | 400 | 200 |
+
+`_handle_request` gibt jede Antwort aus `handle()` über `_json_response` mit 200 zurück; nur die transport-eigenen Fehler (Header, Parse) sind 400.
+
+## Spec
+
+- basic/index, `_meta`: "A request missing any required field is malformed; the server MUST reject it with JSON-RPC error code -32602 (Invalid params). On HTTP, the response status MUST be 400 Bad Request."
+- transports/streamable-http: "If the server does not implement the requested protocol version ... it MUST respond with 400 Bad Request and an UnsupportedProtocolVersionError"
+- ebd.: "If the server does not implement the requested RPC method, it MUST respond with 404 Not Found and a JSON-RPC error with code -32601"
+- ebd., Backward Compatibility: Clients unterscheiden moderne Server an genau diesen 400/404-Bodies.
+
+## Anweisung
+
+1. `_json_response` bekommt einen Status-Parameter (Default 200).
+2. In `_handle_request` nach `handle()`: hat `$response` ein `error`, dann Status nach Code: -32601 → 404; -32020, -32021, -32022 → 400; alles andere (z.B. -32602 für unbekanntes Tool/Resource/Prompt, -32603) → 200 mit Error-Body. Nur diese drei Klassen sind von der Spec vorgegeben.
+3. Fehlende `_meta`-Pflichtfelder: `_validate_headers` prüft heute schon `protocolVersion` im Body (→ 400/-32602). Die Präsenz von `io.modelcontextprotocol/clientCapabilities` dort ebenfalls prüfen → 400/-32602. Dann ist ein -32602 aus `handle()` eindeutig ein Parameterfehler und bleibt 200.
+4. SSE-Downgrade-Logik (`$sse = 0` bei error) bleibt.
+5. README.md, Abschnitt Error Codes: HTTP-Status je Code ergänzen. Changes-Eintrag.
+
+## Tests (t/03) – Achtung, bestehende Claims sind falsch
+
+- Zeile ~170: `is($res->code, 200, '200 OK (JSON-RPC error, not an HTTP error)')` beim -32022-Test behauptet das Gegenteil der Spec → Claim auf 400 ändern und im Commit sagen, dass der Test die Spec falsch wiedergab.
+- Zeile ~649: dito für -32601 (subscriptions/listen) → 404.
+- Neu: fehlende clientCapabilities → 400/-32602; unbekanntes Tool → 200/-32602 (bleibt); -32603 → 200.
+
+Der Schwester-Client (~/dev/p5-net-async-mcp, lib/Net/Async/MCP/Transport/HTTP.pm um Zeile 387 und 971) erwartet 400/404 bereits und liest den Body.
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer, README mcp-server-pod-writer.
+
+2026-09-09 09:23 Done. StreamableHTTP now returns spec-mandated HTTP status for JSON-RPC errors from handle(): -32601 -> 404, -32020/-32021/-32022 -> 400, all other (unknown tool/resource/prompt -32602, internal -32603) stay 200 with error body. New _json_response status param + _http_status_for_response mapper. _validate_headers rejects missing io.modelcontextprotocol/clientCapabilities in body _meta with 400 -32602 (transport-only presence check via new _meta_has; shared handle() and Stdio untouched). SSE downgrade unchanged. t/03: two wrong 200-claims corrected (unsupported version -> 400, subscriptions/listen -> 404) + 3 new subtests; red-before-green verified. prove -l t/ = 100 PASS; dzil test = 103 PASS. README Error Codes documents mapping. Commit 1c7ad3c on worktree branch worktree-streamable-http-fixes (local only, not pushed).

@@ -1,0 +1,49 @@
+---
+class: standard
+completed: 2026-09-09T09:13:05Z
+created: 2026-09-01T19:51:07Z
+id: 33
+priority: high
+started: 2026-09-09T08:56:41Z
+status: done
+tags:
+- http
+- spec
+- interop
+title: 'StreamableHTTP: Mcp-Param-Vergleich für Boolean und Integer (Interop-Fehler
+  mit Net::Async::MCP)'
+updated: 2026-09-09T09:13:35Z
+---
+
+## Befund (reproduziert)
+
+`_validate_headers` vergleicht `"$decoded" eq "$body_value"`. Ein JSON `true` im Body dekodiert zu einem Boolean-Objekt, das als "1" stringifiziert; der Header trägt laut Spec "true" → -32020 HeaderMismatch. Ganzzahlen: Header `42.0` gegen Body `42` → ebenfalls -32020.
+
+Der Schwester-Client `Net::Async::MCP` (~/dev/p5-net-async-mcp, lib/Net/Async/MCP.pm ~Zeile 946) sendet spec-konform `$value ? 'true' : 'false'`. Jeder boolesche `x-mcp-header`-Parameter scheitert also zwischen den beiden Dists.
+
+## Spec (streamable-http, Value Encoding / Server Validation)
+
+- "boolean: Convert to lowercase "true" or "false""; "integer: Convert to decimal string representation"
+- "When validating integer parameter values, servers SHOULD compare the header value and the body value numerically rather than as strings (e.g., 42.0 and 42 are considered equal)."
+
+## Anweisung
+
+Hilfsfunktion `_header_value_matches($header_decoded, $body_value)` und in der Mcp-Param-Schleife verwenden:
+
+- `JSON::MaybeXS::is_bool($body_value)` → Header muss exakt 'true' bzw. 'false' sein.
+- Body ist numerischer Skalar (`!ref && Scalar::Util::looks_like_number`) → Header muss `looks_like_number` sein, dann `==`.
+- sonst `eq`.
+- `undef`/JSON null im Body: Header darf nicht erwartet werden (heute schon so, beibehalten).
+
+Changes-Eintrag.
+
+## Tests (t/03)
+
+- Body `true` + Header `true` → 200; Body `false` + Header `false` → 200.
+- Body `true` + Header `1` → 400/-32020.
+- Body `42` + Header `42.0` → 200; Body `42` + Header `abc` → 400.
+- Body String `"42"` + Header `42.0`: String-Vergleich → 400; als Ermessen im Test kommentieren.
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+2026-09-09 09:13 Done. StreamableHTTP _validate_headers uses new _header_value_matches: JSON bool vs true/false, numeric body compared numerically (header 42.0 == integer 42), else eq. Fixes -32020 interop with Net::Async::MCP. t/03 +6 subtests red-before-green. prove -l t/ 97 PASS, dzil test 100 PASS. Corner body string 42 vs header 42.0 stays 200 by design; strict-by-schema-type is a follow-up. Commit dff86d9, worktree branch worktree-streamable-http-fixes, local only.

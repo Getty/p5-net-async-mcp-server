@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-10T02:15:07Z
+claimed_by: worker-b
+class: standard
+completed: 2026-09-10T02:15:07Z
+created: 2026-08-16T16:19:48Z
+id: 17
+priority: medium
+started: 2026-09-10T01:31:55Z
+status: done
+tags:
+- transport
+- async
+title: StreamableHTTP listen still blocks the event loop
+updated: 2026-09-10T02:15:07Z
+---
+
+Sibling of #1, on the other transport. lib/Net/Async/MCP/Server/Transport/StreamableHTTP.pm, listen(): binds via HTTP::Server::PSGI and runs its own accept loop, so nothing else in the IO::Async loop gets a turn while the server is up. Its POD already calls this out and calls a real async bring-up a future ticket - this is that ticket, so the note has something to point at.
+
+Its POD cross-reference was corrected as part of #1: it used to claim the same caveat applied to Stdio/handle_requests, which is no longer true.
+
+A real fix is an IO::Async::Listener (or IO::Async::Loop::listen) accepting into IO::Async::Stream connections with an HTTP parser, rather than HTTP::Server::PSGI driving the process. That is a larger change than #1 was and needs a decision on whether the Plack/PSGI app interface (to_app) stays the primary entry point, with listen() as the convenience wrapper.
+
+Erledigt und verifiziert (Worker B): User-Entscheidung Wrapper zuerst - to_app als primaeren async-freundlichen Einstieg dokumentiert, listen als bewusst blockierenden Convenience-Wrapper. Reine Doku POD plus README; der Code fuehrte listen schon durch to_app, kein Verhaltens- oder t/03-Change. Nebenbei: host-POD-Referenz auf nicht existierende disable_loopback_warning korrigiert zu allow_external_bind. Commit 1157ec2. Grosser IO-Async-Listener-Umbau bewusst aufgeschoben, Folge-Ticket angelegt. 96 dzil gruen. Lokal, kein Push.

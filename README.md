@@ -27,12 +27,20 @@ Net::Async::MCP::Server — Async MCP (Model Context Protocol) server base class
 # DESCRIPTION
 
 **Net::Async::MCP::Server** is an asynchronous MCP (Model Context Protocol)
-server built on [IO::Async](https://metacpan.org/pod/IO::Async). It implements
-MCP 2026-07-28, the stateless, per-request metadata revision of the spec.
-There is no `initialize` handshake and no shared session — every request
+server built on [IO::Async](https://metacpan.org/pod/IO::Async). By default it
+implements MCP 2026-07-28, the stateless, per-request metadata revision of the
+spec. There is no `initialize` handshake and no shared session — every request
 carries its protocol version, client capabilities, and identity inline in the
 `_meta` field, and every successful result carries a `resultType` and a
 `_meta.io.modelcontextprotocol/serverInfo` entry.
+
+An application that must serve a MCP 2025-11-25 command-line client can
+construct its Stdio server with `legacy_compat => 1`. This is an explicit,
+Stdio-only compatibility path: it accepts `initialize`,
+`notifications/initialized`, `ping`, `tools/list`, and `tools/call` in their
+legacy forms and emits 2025 result shapes. It does not change the default or
+make Streamable HTTP accept legacy requests; correctly formed 2026 requests
+continue to use the 2026 wire format in the same Stdio process.
 
 Subclasses register tools, resources, and prompts; the base class handles
 JSON-RPC 2.0 dispatch and the per-request validation the spec mandates. Two
@@ -85,9 +93,34 @@ The methods this server implements:
   name returns `-32602`). Returns `{ description?, messages => [ { role,
   content => { type => "text", text } } ] }`.
 
-The methods the previous revision exposed — `initialize`,
-`notifications/initialized`, `ping` — are no longer recognised and return
-`-32601 Method not found`.
+The previous revision's methods — `initialize`, `notifications/initialized`,
+and `ping` — remain unrecognised and return `-32601 Method not found` by
+default. See [Legacy Stdio compatibility](#legacy-stdio-compatibility) for
+the explicit opt-in exception.
+
+## Legacy Stdio compatibility
+
+Construct the server with `legacy_compat => 1` only for a Stdio process that
+must serve a MCP 2025-11-25 client:
+
+    my $server = Net::Async::MCP::Server->new(
+        name          => 'my-server',
+        legacy_compat => 1,
+    );
+
+The Stdio transport then accepts the legacy `initialize` request (only when it
+offers `2025-11-25`), `notifications/initialized`, `ping`, `tools/list`, and
+`tools/call` without 2026 request metadata. `initialize` returns exactly
+`protocolVersion`, `capabilities`, and `serverInfo`; `ping` returns `{}`;
+`tools/list` returns `{ tools => [...] }`; and `tools/call` returns legacy
+`content`, `isError`, and optional `structuredContent` fields without a
+2026 `resultType` or `_meta` field. Tool errors remain a `content` result with
+`isError: true`, while unknown tools remain JSON-RPC `-32602` errors.
+
+This path does not add `2025-11-25` to 2026 `supportedVersions`, does not
+change default handling, and does not apply to Streamable HTTP. A complete
+2026 request, including `server/discover`, `tools/list`, or `tools/call`, keeps
+its stateless 2026 response shape in a compatibility-enabled Stdio process.
 
 Every successful result carries `resultType` (defaults to `"complete"`) and
 an `_meta.io.modelcontextprotocol/serverInfo` block injected by the dispatch
@@ -128,6 +161,13 @@ non-blocking I/O and uses
 
 Returns the server name exposed via MCP protocol. Default is
 `'NetAsyncMCPServer'`.
+
+## legacy_compat
+
+    my $enabled = $server->legacy_compat;
+
+Returns whether the Stdio-only MCP 2025-11-25 compatibility path was enabled
+with `legacy_compat => 1`. The default is false.
 
 ## server_info
 

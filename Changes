@@ -2,9 +2,12 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
-  - Breaking protocol migration to MCP 2026-07-28 (stateless, _meta-based).
-  - Drop the initialize handshake: initialize, notifications/initialized and
-    ping are no longer recognised (each returns -32601 Method not found).
+  - Breaking protocol migration to MCP 2026-07-28 (stateless, _meta-based)
+    remains the default. initialize, notifications/initialized and ping return
+    -32601 Method not found unless legacy_compat is enabled.
+  - Add opt-in legacy_compat for Stdio-only MCP 2025-11-25 clients. Its
+    initialize/ping/tools/list/tools/call responses use legacy result shapes;
+    2026 requests keep their stateless resultType and _meta wire format.
   - Every request must carry _meta.io.modelcontextprotocol/protocolVersion
     and _meta.io.modelcontextprotocol/clientCapabilities; missing fields
     return -32602, an unsupported version returns -32022 with the server's
@@ -63,8 +66,6 @@ Revision history for Net-Async-MCP-Server
     (UnsupportedProtocolVersion) are wired into _jsonrpc_error
     (HeaderMismatch is raised by the Streamable HTTP transport, -32022 by
     handle()).
-  - No backwards-compatibility fallback for 2025-11-25 clients; dual-era
-    support is a future ticket.
   - Stdio transport: handle_requests no longer reads through <STDIN>. It
     reads via an IO::Async::Stream registered as a child of the transport and
     waits on an EOF Future, so the caller still blocks until EOF while every

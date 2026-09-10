@@ -238,7 +238,10 @@ sub _handle_line {
         return;
     }
 
-    my $response = $self->server->handle($request);
+    my $response = $self->server->handle(
+        $request,
+        { transport => 'stdio' },
+    );
     $self->_send_response($response) if $response;
 
     return;

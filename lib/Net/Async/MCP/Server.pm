@@ -33,22 +33,27 @@ our $VERSION = '0.002';
 =head1 DESCRIPTION
 
 L<Net::Async::MCP::Server> is an asynchronous MCP (Model Context Protocol) server
-built on L<IO::Async>. It implements the stateless, per-request metadata variant
-of MCP 2026-07-28: every request carries C<io.modelcontextprotocol/*> keys in
-C<_meta>, every successful result carries C<resultType> and an
-C<io.modelcontextprotocol/serverInfo> entry in C<_meta>, and the C<initialize>
-handshake is gone.
+built on L<IO::Async>. By default it implements the stateless, per-request
+metadata variant of MCP 2026-07-28: every request carries
+C<io.modelcontextprotocol/*> keys in C<_meta>, every successful result carries
+C<resultType> and an C<io.modelcontextprotocol/serverInfo> entry in C<_meta>,
+and the C<initialize> handshake is rejected.
+
+Set C<< legacy_compat => 1 >> only when constructing a server used with
+L<Net::Async::MCP::Server::Transport::Stdio> for a MCP 2025-11-25 client. In
+that opt-in path, the Stdio transport accepts the legacy lifecycle and emits
+legacy result shapes; 2026 requests continue to use the stateless wire format.
+L<Net::Async::MCP::Server::Transport::StreamableHTTP> remains 2026-only.
 
 =cut
 
-# The protocol revision this server speaks. Per the 2026-07-28 spec, every
-# request must carry this in _meta.io.modelcontextprotocol/protocolVersion.
+# The protocol revision this server advertises through the 2026-07-28
+# server/discover response. legacy_compat has a separate Stdio-only wire path;
+# it does not make 2025-11-25 a valid 2026 per-request metadata version.
 our $PROTOCOL_VERSION = '2026-07-28';
 
-# The protocol versions a client may negotiate down to. The 2026-07-28 spec is
-# not backwards-compatible with 2025-11-25 (the handshake-based predecessor),
-# so this list is intentionally a single entry; dual-era support is out of
-# scope for 0.002.
+# The 2026-07-28 metadata format does not negotiate down to its handshake-based
+# predecessor. legacy_compat handles 2025-11-25 separately for Stdio.
 sub supported_versions { [ '2026-07-28' ] }
 
 =method supported_versions
@@ -62,10 +67,22 @@ sub configure {
   if (exists $params{name}) {
     $self->{name} = delete $params{name};
   }
+  if (exists $params{legacy_compat}) {
+    $self->{legacy_compat} = delete $params{legacy_compat} ? 1 : 0;
+  }
   $self->SUPER::configure(%params);
 }
 
 sub name { shift->{name} // 'NetAsyncMCPServer' }
+
+sub legacy_compat { shift->{legacy_compat} // 0 }
+
+=method legacy_compat
+
+Returns true when the optional MCP 2025-11-25 compatibility path is enabled
+for L<Net::Async::MCP::Server::Transport::Stdio>. It is false by default.
+
+=cut
 
 =method name
 
@@ -463,7 +480,7 @@ into a single C<user> text message.
 =cut
 
 sub handle {
-    my ( $self, $request ) = @_;
+    my ( $self, $request, $context ) = @_;
 
     return _jsonrpc_error( -32700, 'Invalid JSON-RPC request' )
         unless ref $request eq 'HASH';
@@ -473,6 +490,9 @@ sub handle {
 
     return _jsonrpc_error( -32600, 'Missing JSON-RPC method', $id )
         unless defined $method;
+
+    return $self->_handle_legacy_request($request)
+        if $self->_is_legacy_stdio_request( $request, $context );
 
     if ( defined $id ) {
         # Per-request _meta validation. Required on every RPC; missing or
@@ -510,6 +530,166 @@ sub handle {
     # Notifications (no id): no-op. The stdio transport skips writing
     # anything when handle() returns undef.
     return undef;
+}
+
+sub _is_legacy_stdio_request {
+    my ( $self, $request, $context ) = @_;
+
+    return unless $self->legacy_compat;
+    return unless ref $context eq 'HASH' && $context->{transport} eq 'stdio';
+    return unless $request->{method} =~ /\A(?:initialize|ping|notifications\/initialized|tools\/list|tools\/call)\z/;
+    return unless !defined $self->_request_protocol_version($request);
+
+    return 1;
+}
+
+sub _request_protocol_version {
+    my ( $self, $request ) = @_;
+
+    my $params = $request->{params};
+    return undef unless ref $params eq 'HASH';
+
+    my $meta = $params->{_meta};
+    return undef unless ref $meta eq 'HASH';
+
+    return $meta->{'io.modelcontextprotocol/protocolVersion'};
+}
+
+sub _handle_legacy_request {
+    my ( $self, $request ) = @_;
+
+    my $method = $request->{method};
+    my $id     = $request->{id};
+
+    return undef if $method eq 'notifications/initialized' && !defined $id;
+    return undef unless defined $id;
+
+    if ( $method eq 'initialize' ) {
+        my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
+        my $version = $params->{protocolVersion};
+        unless ( defined $version && $version eq '2025-11-25' ) {
+            return _jsonrpc_error(
+                -32602,
+                'Invalid params: unsupported protocolVersion',
+                $id,
+            );
+        }
+
+        return $self->_legacy_jsonrpc_response(
+            {
+                protocolVersion => '2025-11-25',
+                capabilities    => { tools => {} },
+                serverInfo      => $self->server_info,
+            },
+            $id,
+        );
+    }
+
+    return $self->_legacy_jsonrpc_response( {}, $id ) if $method eq 'ping';
+    return $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
+    return $self->_handle_legacy_tools_call( $request->{params} // {}, $id )
+        if $method eq 'tools/call';
+
+    return _jsonrpc_error( -32601, "Method '$method' not found", $id );
+}
+
+sub _handle_legacy_tools_list {
+    my ( $self, $id ) = @_;
+
+    return $self->_legacy_jsonrpc_response(
+        { tools => $self->list_tools->get },
+        $id,
+    );
+}
+
+sub _handle_legacy_tools_call {
+    my ( $self, $params, $id ) = @_;
+
+    my $name = $params->{name}      // '';
+    my $args = $params->{arguments} // {};
+
+    my $tool = $self->_find_tool($name);
+    unless ($tool) {
+        return _jsonrpc_error(
+            -32602,
+            "Invalid params: unknown tool '$name'",
+            $id,
+        );
+    }
+
+    my $result;
+    eval {
+        $result = $self->call_tool( $name, $args )->get;
+        1;
+    } or do {
+        return $self->_legacy_jsonrpc_response(
+            {
+                content => [ { type => 'text', text => "$@" } ],
+                isError => JSON::MaybeXS::true(),
+            },
+            $id,
+        );
+    };
+
+    return $self->_legacy_jsonrpc_response(
+        $self->_legacy_tool_result($result),
+        $id,
+    );
+}
+
+sub _legacy_tool_result {
+    my ( $self, $result ) = @_;
+
+    if ( ref $result eq 'HASH'
+        && ( ref $result->{content} eq 'ARRAY'
+            || exists $result->{structuredContent} ) ) {
+        my %legacy = (
+            isError => $self->_legacy_boolean($result->{isError}),
+        );
+        $legacy{content} = $result->{content}
+            if ref $result->{content} eq 'ARRAY';
+        $legacy{structuredContent} = $result->{structuredContent}
+            if exists $result->{structuredContent};
+        $legacy{content} = [
+            {
+                type => 'text',
+                text => encode_json($result->{structuredContent}),
+            },
+        ] unless exists $legacy{content};
+        return \%legacy;
+    }
+
+    if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
+        return {
+            content => [
+                {
+                    type => 'text',
+                    text => 'Tool result type '.$result->{resultType}
+                        .' is unavailable with protocol version 2025-11-25',
+                },
+            ],
+            isError => JSON::MaybeXS::true(),
+        };
+    }
+
+    my $text = ref $result
+        ? encode_json($result)
+        : ( defined $result ? "$result" : '' );
+
+    return {
+        content => [ { type => 'text', text => $text } ],
+        isError => JSON::MaybeXS::false(),
+    };
+}
+
+sub _legacy_boolean {
+    my ( $self, $value ) = @_;
+    return $value ? JSON::MaybeXS::true() : JSON::MaybeXS::false();
+}
+
+sub _legacy_jsonrpc_response {
+    my ( $self, $result, $id ) = @_;
+    return { jsonrpc => '2.0', id => $id, result => $result };
 }
 
 =method handle($request)
@@ -601,10 +781,12 @@ C<params.arguments>.
 =item *
 
 Anything else returns C<-32601>, including legacy handshake method names
-such as C<initialize>, C<ping> or C<notifications/initialized> when sent
-with an C<id>. The same names sent as notifications (no C<id>) never
-reach this dispatch — they fall into the no-op/C<undef> path above like
-any other notification, regardless of C<method>.
+such as C<initialize>, C<ping> or C<notifications/initialized> by default.
+When C<legacy_compat> is true and the request arrived from the Stdio transport
+without 2026 request metadata, the 2025-11-25 forms of those methods plus
+C<tools/list> and C<tools/call> use the legacy response shapes instead. The
+same names sent as notifications (no C<id>) otherwise never reach this dispatch
+— they fall into the no-op/C<undef> path above like any other notification.
 
 =back
 

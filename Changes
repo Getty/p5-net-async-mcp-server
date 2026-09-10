@@ -94,6 +94,11 @@ Revision history for Net-Async-MCP-Server
     in both transports, so Stdio and Streamable HTTP agree. Real server->client
     push delivery (subscription change notifications, logging, progress) is a
     future ticket.
+  - Document the Streamable HTTP origin_allow default: an empty list means
+    "allow any Origin", which does not by itself satisfy the spec's
+    DNS-rebinding guard — set origin_allow to your known web origins for any
+    browser-reachable deployment. Behaviour is unchanged; this is a
+    documentation and SYNOPSIS clarification only.
 
 0.001     2026-04-26 03:50:13Z
 

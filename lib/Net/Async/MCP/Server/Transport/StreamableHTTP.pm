@@ -185,9 +185,17 @@ sub path { $_[0]->{path} }
 
     my @allow = @{ $transport->origin_allow };
 
-Returns the ArrayRef of origin URLs the transport permits. An empty list is a
-deliberate "allow any" — most operators will want to lock it down to their
-known web origins.
+Returns the ArrayRef of origin URLs the transport permits.
+
+B<Security:> an empty list — the default — means B<allow any Origin>. The MCP
+Streamable HTTP spec requires the server to validate the C<Origin> header to
+prevent DNS-rebinding attacks, in which a page on an attacker's origin drives
+a victim's browser into a server bound on their own machine. With the default
+in force a cross-origin browser request against a loopback bind is not
+rejected, so set C<origin_allow> to your known web origins on any deployment a
+browser can reach. Once the list is non-empty it is the whole allowlist: a
+request whose C<Origin> header is not in it gets an HTTP 403, while a request
+that sends no C<Origin> header at all is still allowed.
 
 =cut
 

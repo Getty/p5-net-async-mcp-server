@@ -416,10 +416,11 @@ defaulting to `\*STDIN` and `\*STDOUT`. See
     $loop->add($server);
 
     my $http = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
-        server => $server,
-        host   => '127.0.0.1',
-        port   => 8080,
-        path   => '/mcp',
+        server       => $server,
+        host         => '127.0.0.1',
+        port         => 8080,
+        path         => '/mcp',
+        origin_allow => [ 'https://app.example.com' ],
     );
     $loop->add($http);
 
@@ -439,6 +440,13 @@ transport answers each request as `application/json` (default) or as
 `text/event-stream` when the client's `Accept` header asks for it: the
 JSON-RPC response is emitted as a single SSE event and the stream is then
 closed.
+
+**Origin validation.** `origin_allow` defaults to an empty list, which means
+"allow any Origin". The spec requires validating the `Origin` header to guard
+against DNS rebinding, so set `origin_allow` to your known web origins for any
+browser-reachable deployment; once it is non-empty, a request whose `Origin`
+is not listed is answered with HTTP 403 (a request that sends no `Origin`
+header is still allowed).
 
 The transport is a thin wrapper around `Net::Async::MCP::Server::handle`;
 method implementations live in

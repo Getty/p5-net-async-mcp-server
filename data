@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-10T01:30:46Z
+claimed_by: worker-b
+class: standard
+completed: 2026-09-10T01:30:46Z
+created: 2026-09-08T17:23:10Z
+id: 40
+priority: high
+started: 2026-09-08T17:27:23Z
+status: done
+tags:
+- from:sunriser
+title: Optionaler stdio-Kompatibilitätsmodus für Claude Code 2025-11-25
+updated: 2026-09-10T01:30:46Z
+---
+
+Vom Nutzer ausdrücklich genehmigte Ausnahme: legacy_compat opt-in; Default bleibt stateless2026 und verwirft legacy. Benötigt für SunRiser Development MCP auf patrick. Bezug sunriser k13/k14. Keine Änderung des Client-Repos, keine Veröffentlichung. Frameworkcode implementiert; unabhängiger prove-Lauf 7 Dateien/93 Tests bestanden. Integration mit echtem CLI folgt.
+
+Vom Nutzer ausdrücklich genehmigter legacy_compat Optionalmodus fertig; Default2026 und HTTP streng. Legacycapabilities nurTools. Tests93/prove bzw96/dzil mitRelease-Skip; tatsächlicher ClaudeCode2.1.263 lokalConnected mit SunRiser-Registry. FinalerTarballSHA e596fdb9fbffc728b7539e3e1d365c624cc7dfd65fb0c705277502115d32e57b. Uncommitted, keine Veröffentlichung.
+
+Escalated: dirty Tree mit fertiger k40-Arbeit lag uncommitted auf main und blockierte Kohorte Kubernetes/Infra+MCP (k37/k38). Auf GO von Koordinator perl-developer-3f lokal committet von Infra-Worker B: 5783369 (5 Dateien, 93 Tests grün). Kein Push, kein Release. SKILL.md-Drift bewusst ausgelassen.

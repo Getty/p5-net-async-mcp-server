@@ -7,18 +7,27 @@ use Future;
 
 # Helper: build a fully-formed 2026-07-28 request envelope. Tests can override
 # any field by passing args. Mirrors t/02-protocol-2026-07-28.t's helper.
+# Helper: the standard 2026-07-28 params envelope with the required _meta
+# block. Pass extra params (uri, name, arguments) to merge them alongside
+# _meta. Mirrors t/02-protocol-2026-07-28.t's helper.
+sub _params {
+    my (%extra) = @_;
+    return {
+        _meta => {
+            'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => {},
+        },
+        %extra,
+    };
+}
+
 sub _req {
     my (%override) = @_;
     my %base = (
         jsonrpc => '2.0',
         id      => 1,
         method  => 'resources/list',
-        params  => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
-        },
+        params  => _params(),
     );
     return { %base, %override };
 }
@@ -72,13 +81,9 @@ subtest 'resources/read default wrapping: bare scalar becomes one text content' 
     my $response = $server->handle(_req(
         method => 'resources/read',
         id     => 2,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///a.txt',
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -106,13 +111,9 @@ subtest 'resources/read code passthrough: hashref with contents passed through v
     my $response = $server->handle(_req(
         method => 'resources/read',
         id     => 3,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///multi.txt',
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -127,13 +128,9 @@ subtest 'resources/read unknown uri returns -32602' => sub {
     my $response = $server->handle(_req(
         method => 'resources/read',
         id     => 4,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///does-not-exist.txt',
-        },
+        ),
     ));
 
     ok(exists $response->{error}, 'JSON-RPC error returned');
@@ -200,14 +197,10 @@ subtest 'prompts/get default wrapping: bare scalar becomes one user text message
     my $response = $server->handle(_req(
         method => 'prompts/get',
         id     => 8,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'greet',
             arguments => { who => 'World' },
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -235,14 +228,10 @@ subtest 'prompts/get code passthrough: hashref with messages passed through verb
     my $response = $server->handle(_req(
         method => 'prompts/get',
         id     => 9,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'conversation',
             arguments => {},
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -257,14 +246,10 @@ subtest 'prompts/get unknown name returns -32602' => sub {
     my $response = $server->handle(_req(
         method => 'prompts/get',
         id     => 10,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'does_not_exist',
             arguments => {},
-        },
+        ),
     ));
 
     ok(exists $response->{error}, 'JSON-RPC error returned');
@@ -302,13 +287,9 @@ subtest 'resources/read dying code returns -32603, not an exception' => sub {
     my $response = eval { $server->handle(_req(
         method => 'resources/read',
         id     => 20,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///boom.txt',
-        },
+        ),
     )) };
 
     ok($response, 'got response, no exception escaped handle()');
@@ -324,13 +305,9 @@ subtest 'resources/read registered but codeless resource returns -32603' => sub 
     my $response = eval { $server->handle(_req(
         method => 'resources/read',
         id     => 21,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///nocode.txt',
-        },
+        ),
     )) };
 
     ok($response, 'got response, no exception escaped handle()');
@@ -353,14 +330,10 @@ subtest 'prompts/get dying code returns -32603, not an exception' => sub {
     my $response = eval { $server->handle(_req(
         method => 'prompts/get',
         id     => 22,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'boom',
             arguments => {},
-        },
+        ),
     )) };
 
     ok($response, 'got response, no exception escaped handle()');
@@ -376,14 +349,10 @@ subtest 'prompts/get registered but codeless prompt returns -32603' => sub {
     my $response = eval { $server->handle(_req(
         method => 'prompts/get',
         id     => 23,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'nocode',
             arguments => {},
-        },
+        ),
     )) };
 
     ok($response, 'got response, no exception escaped handle()');
@@ -407,13 +376,9 @@ subtest 'resources/read code returning a Future is awaited before wrapping' => s
     my $response = $server->handle(_req(
         method => 'resources/read',
         id     => 24,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             uri => 'file:///async.txt',
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -430,14 +395,10 @@ subtest 'prompts/get code returning a Future is awaited before wrapping' => sub 
     my $response = $server->handle(_req(
         method => 'prompts/get',
         id     => 25,
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'async_greet',
             arguments => {},
-        },
+        ),
     ));
 
     my $r = $response->{result};

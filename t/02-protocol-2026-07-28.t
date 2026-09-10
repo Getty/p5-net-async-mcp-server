@@ -8,18 +8,26 @@ use Future;
 
 # Helper: build a fully-formed 2026-07-28 request envelope. Tests can override
 # any field by passing args.
+# Helper: the standard 2026-07-28 params envelope with the required _meta
+# block. Pass extra params (name, arguments) to merge them alongside _meta.
+sub _params {
+    my (%extra) = @_;
+    return {
+        _meta => {
+            'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => {},
+        },
+        %extra,
+    };
+}
+
 sub _req {
     my (%override) = @_;
     my %base = (
         jsonrpc => '2.0',
         id      => 1,
         method  => 'server/discover',
-        params  => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
-        },
+        params  => _params(),
     );
     return { %base, %override };
 }
@@ -95,14 +103,10 @@ subtest 'tools/call wraps plain return in text content block' => sub {
     my $response = $server->handle(_req(
         id     => 3,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'echo',
             arguments => { value => 'hello' },
-        },
+        ),
     ));
 
     ok($response, 'got response');
@@ -131,14 +135,10 @@ subtest 'tools/call tool error becomes isError result, not JSON-RPC error' => su
     my $response = $server->handle(_req(
         id     => 4,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'boom',
             arguments => {},
-        },
+        ),
     ));
 
     ok($response, 'got response');
@@ -156,14 +156,10 @@ subtest 'tools/call unknown tool returns -32602' => sub {
     my $response = $server->handle(_req(
         id     => 5,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'does_not_exist',
             arguments => {},
-        },
+        ),
     ));
 
     ok($response, 'got response');
@@ -206,14 +202,10 @@ subtest 'MRTR input_required passes through unchanged' => sub {
     my $response = $server->handle(_req(
         id     => 6,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'needs_input',
             arguments => {},
-        },
+        ),
     ));
 
     ok($response, 'got response');
@@ -454,14 +446,10 @@ subtest 'call_tool gets full arguments ref and additional context-free path' => 
     my $response = $server->handle(_req(
         id     => 40,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'arith',
             arguments => { a => 2, b => 3 },
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -529,14 +517,10 @@ subtest 'tool registered with no code -> isError with has no implementation' => 
     my $response = $server->handle(_req(
         id     => 52,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'no_code',
             arguments => {},
-        },
+        ),
     ));
 
     ok($response, 'got response');
@@ -570,14 +554,10 @@ subtest '_meta.serverInfo present on tools/call success and isError results' => 
         my $response = $server->handle(_req(
             id     => 53,
             method => 'tools/call',
-            params => {
-                _meta => {
-                    'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                    'io.modelcontextprotocol/clientCapabilities' => {},
-                },
+            params => _params(
                 name      => $name,
                 arguments => {},
-            },
+            ),
         ));
         is(
             $response->{result}{_meta}{'io.modelcontextprotocol/serverInfo'}{name},
@@ -613,14 +593,10 @@ subtest 'tools/call default wrapping: exact encode_json for arrayref and hashref
     my $array_response = $server->handle(_req(
         id     => 54,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'array_tool',
             arguments => {},
-        },
+        ),
     ));
     is(
         $array_response->{result}{content}[0]{text},
@@ -631,14 +607,10 @@ subtest 'tools/call default wrapping: exact encode_json for arrayref and hashref
     my $hash_response = $server->handle(_req(
         id     => 55,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'hash_tool',
             arguments => {},
-        },
+        ),
     ));
     is(
         $hash_response->{result}{content}[0]{text},
@@ -659,14 +631,10 @@ subtest 'tools/call default wrapping: undef return becomes empty-string text' =>
     my $response = $server->handle(_req(
         id     => 56,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'undef_tool',
             arguments => {},
-        },
+        ),
     ));
 
     is($response->{result}{content}[0]{text}, '', 'undef return is empty-string text content');
@@ -692,14 +660,10 @@ subtest 'tools/call rich content: content arrayref and structuredContent pass th
     my $response = $server->handle(_req(
         id     => 57,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'rich_tool',
             arguments => {},
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -724,14 +688,10 @@ subtest 'tools/call rich content: structuredContent alone (no content key) passe
     my $response = $server->handle(_req(
         id     => 58,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'structured_only_tool',
             arguments => {},
-        },
+        ),
     ));
 
     my $r = $response->{result};
@@ -752,14 +712,10 @@ subtest 'tools/call tool returning a Future is awaited before wrapping' => sub {
     my $response = eval { $server->handle(_req(
         id     => 60,
         method => 'tools/call',
-        params => {
-            _meta => {
-                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
-                'io.modelcontextprotocol/clientCapabilities' => {},
-            },
+        params => _params(
             name      => 'future_tool',
             arguments => {},
-        },
+        ),
     )) };
 
     ok($response, 'got response, no exception escaped handle()');

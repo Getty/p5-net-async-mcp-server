@@ -9,7 +9,7 @@ use parent 'IO::Async::Notifier';
 use JSON::MaybeXS qw( encode_json decode_json );
 use MIME::Base64 qw( decode_base64 );
 use Encode      qw( decode FB_DEFAULT );
-use Scalar::Util qw( blessed );
+use HTTP::Server::PSGI;
 
 our $VERSION = '0.002';
 
@@ -240,8 +240,6 @@ sub listen {
           . "this is non-loopback. Set 'host' to 127.0.0.1 or pass "
           . "allow_external_bind to acknowledge.\n";
     }
-
-    require HTTP::Server::PSGI;
 
     my $server = HTTP::Server::PSGI->new(
         host => $host,

@@ -6,7 +6,6 @@ use warnings;
 
 use parent 'IO::Async::Notifier';
 
-use Future::AsyncAwait;
 use IO::Async::Loop;
 use IO::Async::Stream;
 use IO::Handle;

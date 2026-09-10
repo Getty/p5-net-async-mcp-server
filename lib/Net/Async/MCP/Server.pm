@@ -9,6 +9,7 @@ use parent 'IO::Async::Notifier';
 use Future::AsyncAwait;
 
 use JSON::MaybeXS qw( encode_json );
+use Carp qw( croak );
 
 our $VERSION = '0.002';
 
@@ -159,7 +160,7 @@ Returns ArrayRef of registered tool definitions (internal storage shape).
 
 sub register_tool {
     my ( $self, %tool ) = @_;
-    die "register_tool requires 'name'" unless defined $tool{name};
+    croak q{register_tool requires 'name'} unless defined $tool{name};
 
     # Normalise input_schema -> inputSchema. Accept the legacy snake_case key
     # so existing callers don't have to change in lockstep.
@@ -167,7 +168,7 @@ sub register_tool {
         $tool{inputSchema} = delete $tool{input_schema};
     }
 
-    die "Tool '$tool{name}' requires 'inputSchema'"
+    croak "Tool '$tool{name}' requires 'inputSchema'"
         unless exists $tool{inputSchema};
 
     $self->{tools} //= [];
@@ -212,7 +213,7 @@ async sub call_tool {
     my ( $self, $name, $arguments ) = @_;
 
     my $tool = $self->_find_tool($name);
-    die "No tool registered: $name" unless $tool;
+    croak "No tool registered: $name" unless $tool;
 
     if (my $code = $tool->{code}) {
         my $result = $code->($arguments);
@@ -220,7 +221,7 @@ async sub call_tool {
         return $result;
     }
 
-    die "Tool '$name' has no implementation";
+    croak "Tool '$name' has no implementation";
 }
 
 sub _find_tool {
@@ -228,7 +229,7 @@ sub _find_tool {
     for my $tool (@{ $self->{tools} // [] }) {
         return $tool if $tool->{name} eq $name;
     }
-    return undef;
+    return;
 }
 
 =method call_tool($name, $arguments)
@@ -283,8 +284,8 @@ Returns ArrayRef of registered resource definitions (internal storage shape).
 
 sub register_resource {
     my ( $self, %resource ) = @_;
-    die "register_resource requires 'uri'"  unless defined $resource{uri};
-    die "register_resource requires 'name'" unless defined $resource{name};
+    croak q{register_resource requires 'uri'}  unless defined $resource{uri};
+    croak q{register_resource requires 'name'} unless defined $resource{name};
 
     $self->{resources} //= [];
     push @{ $self->{resources} }, \%resource;
@@ -327,7 +328,7 @@ async sub read_resource {
     my ( $self, $uri ) = @_;
 
     my $resource = $self->_find_resource($uri);
-    die "No resource registered: $uri" unless $resource;
+    croak "No resource registered: $uri" unless $resource;
 
     my $result;
     if ( my $code = $resource->{code} ) {
@@ -335,7 +336,7 @@ async sub read_resource {
         $result = await $result if ref $result eq 'Future';
     }
     else {
-        die "Resource '$uri' has no implementation";
+        croak "Resource '$uri' has no implementation";
     }
 
     # A resource may return its own result hashref already carrying contents
@@ -359,7 +360,7 @@ sub _find_resource {
     for my $resource ( @{ $self->{resources} // [] } ) {
         return $resource if $resource->{uri} eq $uri;
     }
-    return undef;
+    return;
 }
 
 =method read_resource($uri)
@@ -387,7 +388,7 @@ Returns ArrayRef of registered prompt definitions (internal storage shape).
 
 sub register_prompt {
     my ( $self, %prompt ) = @_;
-    die "register_prompt requires 'name'" unless defined $prompt{name};
+    croak q{register_prompt requires 'name'} unless defined $prompt{name};
 
     $self->{prompts} //= [];
     push @{ $self->{prompts} }, \%prompt;
@@ -428,7 +429,7 @@ async sub get_prompt {
     my ( $self, $name, $arguments ) = @_;
 
     my $prompt = $self->_find_prompt($name);
-    die "No prompt registered: $name" unless $prompt;
+    croak "No prompt registered: $name" unless $prompt;
 
     my $result;
     if ( my $code = $prompt->{code} ) {
@@ -436,7 +437,7 @@ async sub get_prompt {
         $result = await $result if ref $result eq 'Future';
     }
     else {
-        die "Prompt '$name' has no implementation";
+        croak "Prompt '$name' has no implementation";
     }
 
     # A prompt may return its own result hashref already carrying a messages
@@ -463,7 +464,7 @@ sub _find_prompt {
     for my $prompt ( @{ $self->{prompts} // [] } ) {
         return $prompt if $prompt->{name} eq $name;
     }
-    return undef;
+    return;
 }
 
 =method get_prompt($name, $arguments)

@@ -74,60 +74,60 @@ Returns ArrayRef of protocol version strings this server accepts.
 # fields, error messages and normalisation genuinely differ per kind — but
 # everything downstream of a stored entry is generic.
 my %REGISTRY = (
-    tools => {
-        key  => 'name',
-        wire => {
-            required => [qw( name description inputSchema )],
-            optional => [qw( title annotations outputSchema )],
-        },
+  tools => {
+    key  => 'name',
+    wire => {
+      required => [qw( name description inputSchema )],
+      optional => [qw( title annotations outputSchema )],
     },
-    resources => {
-        key  => 'uri',
-        wire => {
-            required => [qw( uri name )],
-            optional => [qw( mimeType description title )],
-        },
+  },
+  resources => {
+    key  => 'uri',
+    wire => {
+      required => [qw( uri name )],
+      optional => [qw( mimeType description title )],
     },
-    prompts => {
-        key  => 'name',
-        wire => {
-            required => [qw( name )],
-            optional => [qw( title description )],
-            defaults => { arguments => sub { [] } },
-        },
+  },
+  prompts => {
+    key  => 'name',
+    wire => {
+      required => [qw( name )],
+      optional => [qw( title description )],
+      defaults => { arguments => sub { [] } },
     },
+  },
 );
 
 sub _register {
-    my ( $self, $kind, %def ) = @_;
-    push @{ $self->{$kind} //= [] }, \%def;
-    return;
+  my ( $self, $kind, %def ) = @_;
+  push @{ $self->{$kind} //= [] }, \%def;
+  return;
 }
 
 sub _find {
-    my ( $self, $kind, $key ) = @_;
-    my $field = $REGISTRY{$kind}{key};
-    for my $entry ( @{ $self->{$kind} // [] } ) {
-        return $entry if $entry->{$field} eq $key;
-    }
-    return;
+  my ( $self, $kind, $key ) = @_;
+  my $field = $REGISTRY{$kind}{key};
+  for my $entry ( @{ $self->{$kind} // [] } ) {
+    return $entry if $entry->{$field} eq $key;
+  }
+  return;
 }
 
 sub _wire_shape {
-    my ( $self, $kind, $def ) = @_;
-    my $spec = $REGISTRY{$kind}{wire};
+  my ( $self, $kind, $def ) = @_;
+  my $spec = $REGISTRY{$kind}{wire};
 
-    my %wire;
-    $wire{$_} = $def->{$_} for @{ $spec->{required} };
-    for my $field ( sort keys %{ $spec->{defaults} // {} } ) {
-        $wire{$field} = defined $def->{$field}
-            ? $def->{$field}
-            : $spec->{defaults}{$field}->();
-    }
-    for my $field ( @{ $spec->{optional} } ) {
-        $wire{$field} = $def->{$field} if defined $def->{$field};
-    }
-    return \%wire;
+  my %wire;
+  $wire{$_} = $def->{$_} for @{ $spec->{required} };
+  for my $field ( sort keys %{ $spec->{defaults} // {} } ) {
+    $wire{$field} = defined $def->{$field}
+      ? $def->{$field}
+      : $spec->{defaults}{$field}->();
+  }
+  for my $field ( @{ $spec->{optional} } ) {
+    $wire{$field} = $def->{$field} if defined $def->{$field};
+  }
+  return \%wire;
 }
 
 sub configure {
@@ -159,11 +159,11 @@ Returns the server name exposed via MCP protocol.
 =cut
 
 sub server_info {
-    my ( $self ) = @_;
-    return {
-        name    => $self->name,
-        version => $VERSION,
-    };
+  my ( $self ) = @_;
+  return {
+    name    => $self->name,
+    version => $VERSION,
+  };
 }
 
 =method server_info
@@ -173,8 +173,8 @@ Returns a hashref with C<name> and C<version> keys for the MCP protocol.
 =cut
 
 sub server_capabilities {
-    my ( $self ) = @_;
-    return $self->_build_capabilities;
+  my ( $self ) = @_;
+  return $self->_build_capabilities;
 }
 
 =method server_capabilities
@@ -184,23 +184,23 @@ Returns the server capabilities hashref.
 =cut
 
 sub _build_capabilities {
-    my ( $self ) = @_;
-    my %cap = ( tools => {} );
-    $cap{resources} = {} if @{ $self->resources };
-    $cap{prompts}   = {} if @{ $self->prompts };
-    return \%cap;
+  my ( $self ) = @_;
+  my %cap = ( tools => {} );
+  $cap{resources} = {} if @{ $self->resources };
+  $cap{prompts}   = {} if @{ $self->prompts };
+  return \%cap;
 }
 
 async sub discover {
-    my ( $self ) = @_;
+  my ( $self ) = @_;
 
-    return {
-        resultType        => 'complete',
-        supportedVersions  => $self->supported_versions,
-        capabilities       => $self->server_capabilities,
-        ttlMs              => 300000,
-        cacheScope         => 'public',
-    };
+  return {
+    resultType        => 'complete',
+    supportedVersions  => $self->supported_versions,
+    capabilities       => $self->server_capabilities,
+    ttlMs              => 300000,
+    cacheScope         => 'public',
+  };
 }
 
 =method discover
@@ -215,8 +215,8 @@ C<_jsonrpc_response>, to every response C<handle> sends.
 =cut
 
 sub tools {
-    my ( $self ) = @_;
-    return $self->{tools} // [];
+  my ( $self ) = @_;
+  return $self->{tools} // [];
 }
 
 =method tools
@@ -226,19 +226,19 @@ Returns ArrayRef of registered tool definitions (internal storage shape).
 =cut
 
 sub register_tool {
-    my ( $self, %tool ) = @_;
-    croak q{register_tool requires 'name'} unless defined $tool{name};
+  my ( $self, %tool ) = @_;
+  croak q{register_tool requires 'name'} unless defined $tool{name};
 
-    # Normalise input_schema -> inputSchema. Accept the legacy snake_case key
-    # so existing callers don't have to change in lockstep.
-    if ( exists $tool{input_schema} && !exists $tool{inputSchema} ) {
-        $tool{inputSchema} = delete $tool{input_schema};
-    }
+  # Normalise input_schema -> inputSchema. Accept the legacy snake_case key
+  # so existing callers don't have to change in lockstep.
+  if ( exists $tool{input_schema} && !exists $tool{inputSchema} ) {
+    $tool{inputSchema} = delete $tool{input_schema};
+  }
 
-    croak "Tool '$tool{name}' requires 'inputSchema'"
-        unless exists $tool{inputSchema};
+  croak "Tool '$tool{name}' requires 'inputSchema'"
+    unless exists $tool{inputSchema};
 
-    return $self->_register( tools => %tool );
+  return $self->_register( tools => %tool );
 }
 
 =method register_tool(%tool)
@@ -251,8 +251,8 @@ non-conformant under MCP 2026-07-28.
 =cut
 
 async sub list_tools {
-    my ( $self ) = @_;
-    return [ map { $self->_wire_shape( tools => $_ ) } @{ $self->{tools} // [] } ];
+  my ( $self ) = @_;
+  return [ map { $self->_wire_shape( tools => $_ ) } @{ $self->{tools} // [] } ];
 }
 
 =method list_tools
@@ -263,18 +263,18 @@ shape (C<inputSchema>, not C<input_schema>).
 =cut
 
 async sub call_tool {
-    my ( $self, $name, $arguments ) = @_;
+  my ( $self, $name, $arguments ) = @_;
 
-    my $tool = $self->_find( tools => $name );
-    croak "No tool registered: $name" unless $tool;
+  my $tool = $self->_find( tools => $name );
+  croak "No tool registered: $name" unless $tool;
 
-    if (my $code = $tool->{code}) {
-        my $result = $code->($arguments);
-        $result = await $result if ref $result eq 'Future';
-        return $result;
-    }
+  if (my $code = $tool->{code}) {
+    my $result = $code->($arguments);
+    $result = await $result if ref $result eq 'Future';
+    return $result;
+  }
 
-    croak "Tool '$name' has no implementation";
+  croak "Tool '$name' has no implementation";
 }
 
 =method call_tool($name, $arguments)
@@ -317,8 +317,8 @@ shaped like:
 =cut
 
 sub resources {
-    my ( $self ) = @_;
-    return $self->{resources} // [];
+  my ( $self ) = @_;
+  return $self->{resources} // [];
 }
 
 =method resources
@@ -328,11 +328,11 @@ Returns ArrayRef of registered resource definitions (internal storage shape).
 =cut
 
 sub register_resource {
-    my ( $self, %resource ) = @_;
-    croak q{register_resource requires 'uri'}  unless defined $resource{uri};
-    croak q{register_resource requires 'name'} unless defined $resource{name};
+  my ( $self, %resource ) = @_;
+  croak q{register_resource requires 'uri'}  unless defined $resource{uri};
+  croak q{register_resource requires 'name'} unless defined $resource{name};
 
-    return $self->_register( resources => %resource );
+  return $self->_register( resources => %resource );
 }
 
 =method register_resource(%resource)
@@ -344,8 +344,8 @@ URI when the resource is read.
 =cut
 
 async sub list_resources {
-    my ( $self ) = @_;
-    return [ map { $self->_wire_shape( resources => $_ ) } @{ $self->{resources} // [] } ];
+  my ( $self ) = @_;
+  return [ map { $self->_wire_shape( resources => $_ ) } @{ $self->{resources} // [] } ];
 }
 
 =method list_resources
@@ -357,34 +357,34 @@ C<title>).
 =cut
 
 async sub read_resource {
-    my ( $self, $uri ) = @_;
+  my ( $self, $uri ) = @_;
 
-    my $resource = $self->_find( resources => $uri );
-    croak "No resource registered: $uri" unless $resource;
+  my $resource = $self->_find( resources => $uri );
+  croak "No resource registered: $uri" unless $resource;
 
-    my $result;
-    if ( my $code = $resource->{code} ) {
-        $result = $code->($uri);
-        $result = await $result if ref $result eq 'Future';
-    }
-    else {
-        croak "Resource '$uri' has no implementation";
-    }
+  my $result;
+  if ( my $code = $resource->{code} ) {
+    $result = $code->($uri);
+    $result = await $result if ref $result eq 'Future';
+  }
+  else {
+    croak "Resource '$uri' has no implementation";
+  }
 
-    # A resource may return its own result hashref already carrying contents
-    # blocks (multiple parts, a blob, an explicit mimeType). Pass it through.
-    return $result
-        if ref $result eq 'HASH' && ref $result->{contents} eq 'ARRAY';
+  # A resource may return its own result hashref already carrying contents
+  # blocks (multiple parts, a blob, an explicit mimeType). Pass it through.
+  return $result
+    if ref $result eq 'HASH' && ref $result->{contents} eq 'ARRAY';
 
-    # Default wrapping: a bare scalar becomes a single text content block,
-    # tagged with the resource's declared mimeType when it has one.
-    my $content = {
-        uri  => $uri,
-        text => ( defined $result ? "$result" : '' ),
-    };
-    $content->{mimeType} = $resource->{mimeType} if defined $resource->{mimeType};
+  # Default wrapping: a bare scalar becomes a single text content block,
+  # tagged with the resource's declared mimeType when it has one.
+  my $content = {
+    uri  => $uri,
+    text => ( defined $result ? "$result" : '' ),
+  };
+  $content->{mimeType} = $resource->{mimeType} if defined $resource->{mimeType};
 
-    return { contents => [ $content ] };
+  return { contents => [ $content ] };
 }
 
 =method read_resource($uri)
@@ -400,8 +400,8 @@ into a single text content block tagged with the resource's C<mimeType>.
 =cut
 
 sub prompts {
-    my ( $self ) = @_;
-    return $self->{prompts} // [];
+  my ( $self ) = @_;
+  return $self->{prompts} // [];
 }
 
 =method prompts
@@ -411,10 +411,10 @@ Returns ArrayRef of registered prompt definitions (internal storage shape).
 =cut
 
 sub register_prompt {
-    my ( $self, %prompt ) = @_;
-    croak q{register_prompt requires 'name'} unless defined $prompt{name};
+  my ( $self, %prompt ) = @_;
+  croak q{register_prompt requires 'name'} unless defined $prompt{name};
 
-    return $self->_register( prompts => %prompt );
+  return $self->_register( prompts => %prompt );
 }
 
 =method register_prompt(%prompt)
@@ -426,8 +426,8 @@ arguments when the prompt is fetched.
 =cut
 
 async sub list_prompts {
-    my ( $self ) = @_;
-    return [ map { $self->_wire_shape( prompts => $_ ) } @{ $self->{prompts} // [] } ];
+  my ( $self ) = @_;
+  return [ map { $self->_wire_shape( prompts => $_ ) } @{ $self->{prompts} // [] } ];
 }
 
 =method list_prompts
@@ -438,37 +438,37 @@ shape (C<name>, C<arguments>, and the optional C<title>, C<description>).
 =cut
 
 async sub get_prompt {
-    my ( $self, $name, $arguments ) = @_;
+  my ( $self, $name, $arguments ) = @_;
 
-    my $prompt = $self->_find( prompts => $name );
-    croak "No prompt registered: $name" unless $prompt;
+  my $prompt = $self->_find( prompts => $name );
+  croak "No prompt registered: $name" unless $prompt;
 
-    my $result;
-    if ( my $code = $prompt->{code} ) {
-        $result = $code->($arguments);
-        $result = await $result if ref $result eq 'Future';
-    }
-    else {
-        croak "Prompt '$name' has no implementation";
-    }
+  my $result;
+  if ( my $code = $prompt->{code} ) {
+    $result = $code->($arguments);
+    $result = await $result if ref $result eq 'Future';
+  }
+  else {
+    croak "Prompt '$name' has no implementation";
+  }
 
-    # A prompt may return its own result hashref already carrying a messages
-    # arrayref (and an optional description). Pass it through verbatim.
-    return $result
-        if ref $result eq 'HASH' && ref $result->{messages} eq 'ARRAY';
+  # A prompt may return its own result hashref already carrying a messages
+  # arrayref (and an optional description). Pass it through verbatim.
+  return $result
+    if ref $result eq 'HASH' && ref $result->{messages} eq 'ARRAY';
 
-    # Default wrapping: a bare scalar becomes a single user text message.
-    return {
-        messages => [
-            {
-                role    => 'user',
-                content => {
-                    type => 'text',
-                    text => ( defined $result ? "$result" : '' ),
-                },
-            },
-        ],
-    };
+  # Default wrapping: a bare scalar becomes a single user text message.
+  return {
+    messages => [
+      {
+        role    => 'user',
+        content => {
+          type => 'text',
+          text => ( defined $result ? "$result" : '' ),
+        },
+      },
+    ],
+  };
 }
 
 =method get_prompt($name, $arguments)
@@ -488,208 +488,208 @@ into a single C<user> text message.
 # entry is invoked as $self->$handler( $request, $id ) and pulls whatever it
 # needs (params, id) from those; this map replaces the former if/elsif ladder.
 my %DISPATCH = (
-    'server/discover' => sub { $_[0]->_handle_discover( $_[2] ) },
-    'tools/list'      => sub { $_[0]->_handle_tools_list( $_[2] ) },
-    'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2] ) },
-    'resources/list'  => sub { $_[0]->_handle_resources_list( $_[2] ) },
-    'resources/read'  => sub { $_[0]->_handle_resources_read( $_[1]->{params} // {}, $_[2] ) },
-    'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[2] ) },
-    'prompts/get'     => sub { $_[0]->_handle_prompts_get( $_[1]->{params} // {}, $_[2] ) },
+  'server/discover' => sub { $_[0]->_handle_discover( $_[2] ) },
+  'tools/list'      => sub { $_[0]->_handle_tools_list( $_[2] ) },
+  'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2] ) },
+  'resources/list'  => sub { $_[0]->_handle_resources_list( $_[2] ) },
+  'resources/read'  => sub { $_[0]->_handle_resources_read( $_[1]->{params} // {}, $_[2] ) },
+  'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[2] ) },
+  'prompts/get'     => sub { $_[0]->_handle_prompts_get( $_[1]->{params} // {}, $_[2] ) },
 );
 
 sub handle {
-    my ( $self, $request, $context ) = @_;
+  my ( $self, $request, $context ) = @_;
 
-    return _jsonrpc_error( -32700, 'Invalid JSON-RPC request' )
-        unless ref $request eq 'HASH';
+  return _jsonrpc_error( -32700, 'Invalid JSON-RPC request' )
+    unless ref $request eq 'HASH';
 
-    my $method = $request->{method};
-    my $id     = $request->{id};
+  my $method = $request->{method};
+  my $id     = $request->{id};
 
-    return _jsonrpc_error( -32600, 'Missing JSON-RPC method', $id )
-        unless defined $method;
+  return _jsonrpc_error( -32600, 'Missing JSON-RPC method', $id )
+    unless defined $method;
 
-    return $self->_handle_legacy_request($request)
-        if $self->_is_legacy_stdio_request( $request, $context );
+  return $self->_handle_legacy_request($request)
+    if $self->_is_legacy_stdio_request( $request, $context );
 
-    if ( defined $id ) {
-        # Per-request _meta validation. Required on every RPC; missing or
-        # wrong-version fields short-circuit the dispatch with a JSON-RPC
-        # error so the client can fall back / renegotiate.
-        if ( my $err = $self->_validate_request_meta($request) ) {
-            return $err;
-        }
-
-        if ( my $handler = $DISPATCH{$method} ) {
-            return $self->$handler( $request, $id );
-        }
-
-        return _jsonrpc_error( -32601, "Method '$method' not found", $id );
+  if ( defined $id ) {
+    # Per-request _meta validation. Required on every RPC; missing or
+    # wrong-version fields short-circuit the dispatch with a JSON-RPC
+    # error so the client can fall back / renegotiate.
+    if ( my $err = $self->_validate_request_meta($request) ) {
+      return $err;
     }
 
-    # Notifications (no id): no-op. The stdio transport skips writing
-    # anything when handle() returns undef.
-    return undef;
+    if ( my $handler = $DISPATCH{$method} ) {
+      return $self->$handler( $request, $id );
+    }
+
+    return _jsonrpc_error( -32601, "Method '$method' not found", $id );
+  }
+
+  # Notifications (no id): no-op. The stdio transport skips writing
+  # anything when handle() returns undef.
+  return undef;
 }
 
 sub _is_legacy_stdio_request {
-    my ( $self, $request, $context ) = @_;
+  my ( $self, $request, $context ) = @_;
 
-    return unless $self->legacy_compat;
-    return unless ref $context eq 'HASH' && $context->{transport} eq 'stdio';
-    return unless $request->{method} =~ /\A(?:initialize|ping|notifications\/initialized|tools\/list|tools\/call)\z/;
-    return unless !defined $self->_request_protocol_version($request);
+  return unless $self->legacy_compat;
+  return unless ref $context eq 'HASH' && $context->{transport} eq 'stdio';
+  return unless $request->{method} =~ /\A(?:initialize|ping|notifications\/initialized|tools\/list|tools\/call)\z/;
+  return unless !defined $self->_request_protocol_version($request);
 
-    return 1;
+  return 1;
 }
 
 sub _request_protocol_version {
-    my ( $self, $request ) = @_;
+  my ( $self, $request ) = @_;
 
-    my $params = $request->{params};
-    return undef unless ref $params eq 'HASH';
+  my $params = $request->{params};
+  return undef unless ref $params eq 'HASH';
 
-    my $meta = $params->{_meta};
-    return undef unless ref $meta eq 'HASH';
+  my $meta = $params->{_meta};
+  return undef unless ref $meta eq 'HASH';
 
-    return $meta->{'io.modelcontextprotocol/protocolVersion'};
+  return $meta->{'io.modelcontextprotocol/protocolVersion'};
 }
 
 sub _handle_legacy_request {
-    my ( $self, $request ) = @_;
+  my ( $self, $request ) = @_;
 
-    my $method = $request->{method};
-    my $id     = $request->{id};
+  my $method = $request->{method};
+  my $id     = $request->{id};
 
-    return undef if $method eq 'notifications/initialized' && !defined $id;
-    return undef unless defined $id;
+  return undef if $method eq 'notifications/initialized' && !defined $id;
+  return undef unless defined $id;
 
-    if ( $method eq 'initialize' ) {
-        my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
-        my $version = $params->{protocolVersion};
-        unless ( defined $version && $version eq '2025-11-25' ) {
-            return _jsonrpc_error(
-                -32602,
-                'Invalid params: unsupported protocolVersion',
-                $id,
-            );
-        }
-
-        return $self->_legacy_jsonrpc_response(
-            {
-                protocolVersion => '2025-11-25',
-                capabilities    => { tools => {} },
-                serverInfo      => $self->server_info,
-            },
-            $id,
-        );
+  if ( $method eq 'initialize' ) {
+    my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
+    my $version = $params->{protocolVersion};
+    unless ( defined $version && $version eq '2025-11-25' ) {
+      return _jsonrpc_error(
+        -32602,
+        'Invalid params: unsupported protocolVersion',
+        $id,
+      );
     }
 
-    return $self->_legacy_jsonrpc_response( {}, $id ) if $method eq 'ping';
-    return $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
-    return $self->_handle_legacy_tools_call( $request->{params} // {}, $id )
-        if $method eq 'tools/call';
+    return $self->_legacy_jsonrpc_response(
+      {
+        protocolVersion => '2025-11-25',
+        capabilities    => { tools => {} },
+        serverInfo      => $self->server_info,
+      },
+      $id,
+    );
+  }
 
-    return _jsonrpc_error( -32601, "Method '$method' not found", $id );
+  return $self->_legacy_jsonrpc_response( {}, $id ) if $method eq 'ping';
+  return $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
+  return $self->_handle_legacy_tools_call( $request->{params} // {}, $id )
+    if $method eq 'tools/call';
+
+  return _jsonrpc_error( -32601, "Method '$method' not found", $id );
 }
 
 sub _handle_legacy_tools_list {
-    my ( $self, $id ) = @_;
+  my ( $self, $id ) = @_;
 
-    return $self->_legacy_jsonrpc_response(
-        { tools => $self->list_tools->get },
-        $id,
-    );
+  return $self->_legacy_jsonrpc_response(
+    { tools => $self->list_tools->get },
+    $id,
+  );
 }
 
 sub _handle_legacy_tools_call {
-    my ( $self, $params, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-    my $name = $params->{name}      // '';
-    my $args = $params->{arguments} // {};
+  my $name = $params->{name}      // '';
+  my $args = $params->{arguments} // {};
 
-    my $tool = $self->_find( tools => $name );
-    unless ($tool) {
-        return _jsonrpc_error(
-            -32602,
-            "Invalid params: unknown tool '$name'",
-            $id,
-        );
-    }
-
-    my $result;
-    eval {
-        $result = $self->call_tool( $name, $args )->get;
-        1;
-    } or do {
-        return $self->_legacy_jsonrpc_response(
-            {
-                content => [ { type => 'text', text => "$@" } ],
-                isError => JSON::MaybeXS::true(),
-            },
-            $id,
-        );
-    };
-
-    return $self->_legacy_jsonrpc_response(
-        $self->_legacy_tool_result($result),
-        $id,
+  my $tool = $self->_find( tools => $name );
+  unless ($tool) {
+    return _jsonrpc_error(
+      -32602,
+      "Invalid params: unknown tool '$name'",
+      $id,
     );
+  }
+
+  my $result;
+  eval {
+    $result = $self->call_tool( $name, $args )->get;
+    1;
+  } or do {
+    return $self->_legacy_jsonrpc_response(
+      {
+        content => [ { type => 'text', text => "$@" } ],
+        isError => JSON::MaybeXS::true(),
+      },
+      $id,
+    );
+  };
+
+  return $self->_legacy_jsonrpc_response(
+    $self->_legacy_tool_result($result),
+    $id,
+  );
 }
 
 sub _legacy_tool_result {
-    my ( $self, $result ) = @_;
+  my ( $self, $result ) = @_;
 
-    if ( ref $result eq 'HASH'
-        && ( ref $result->{content} eq 'ARRAY'
-            || exists $result->{structuredContent} ) ) {
-        my %legacy = (
-            isError => $self->_legacy_boolean($result->{isError}),
-        );
-        $legacy{content} = $result->{content}
-            if ref $result->{content} eq 'ARRAY';
-        $legacy{structuredContent} = $result->{structuredContent}
-            if exists $result->{structuredContent};
-        $legacy{content} = [
-            {
-                type => 'text',
-                text => encode_json($result->{structuredContent}),
-            },
-        ] unless exists $legacy{content};
-        return \%legacy;
-    }
+  if ( ref $result eq 'HASH'
+    && ( ref $result->{content} eq 'ARRAY'
+      || exists $result->{structuredContent} ) ) {
+    my %legacy = (
+      isError => $self->_legacy_boolean($result->{isError}),
+    );
+    $legacy{content} = $result->{content}
+      if ref $result->{content} eq 'ARRAY';
+    $legacy{structuredContent} = $result->{structuredContent}
+      if exists $result->{structuredContent};
+    $legacy{content} = [
+      {
+        type => 'text',
+        text => encode_json($result->{structuredContent}),
+      },
+    ] unless exists $legacy{content};
+    return \%legacy;
+  }
 
-    if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
-        return {
-            content => [
-                {
-                    type => 'text',
-                    text => 'Tool result type '.$result->{resultType}
-                        .' is unavailable with protocol version 2025-11-25',
-                },
-            ],
-            isError => JSON::MaybeXS::true(),
-        };
-    }
-
-    my $text = ref $result
-        ? encode_json($result)
-        : ( defined $result ? "$result" : '' );
-
+  if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
     return {
-        content => [ { type => 'text', text => $text } ],
-        isError => JSON::MaybeXS::false(),
+      content => [
+        {
+          type => 'text',
+          text => 'Tool result type '.$result->{resultType}
+            .' is unavailable with protocol version 2025-11-25',
+        },
+      ],
+      isError => JSON::MaybeXS::true(),
     };
+  }
+
+  my $text = ref $result
+    ? encode_json($result)
+    : ( defined $result ? "$result" : '' );
+
+  return {
+    content => [ { type => 'text', text => $text } ],
+    isError => JSON::MaybeXS::false(),
+  };
 }
 
 sub _legacy_boolean {
-    my ( $self, $value ) = @_;
-    return $value ? JSON::MaybeXS::true() : JSON::MaybeXS::false();
+  my ( $self, $value ) = @_;
+  return $value ? JSON::MaybeXS::true() : JSON::MaybeXS::false();
 }
 
 sub _legacy_jsonrpc_response {
-    my ( $self, $result, $id ) = @_;
-    return { jsonrpc => '2.0', id => $id, result => $result };
+  my ( $self, $result, $id ) = @_;
+  return { jsonrpc => '2.0', id => $id, result => $result };
 }
 
 =method handle($request)
@@ -798,241 +798,241 @@ L<Net::Async::MCP::Server::Transport::StreamableHTTP>, not by C<handle>.
 =cut
 
 sub _validate_request_meta {
-    my ( $self, $request ) = @_;
-    my $id     = $request->{id};
-    my $params = $request->{params};
-    my $meta   = ( ref $params eq 'HASH' && ref $params->{_meta} eq 'HASH' )
-        ? $params->{_meta}
-        : {};
+  my ( $self, $request ) = @_;
+  my $id     = $request->{id};
+  my $params = $request->{params};
+  my $meta   = ( ref $params eq 'HASH' && ref $params->{_meta} eq 'HASH' )
+    ? $params->{_meta}
+    : {};
 
-    my $version = $meta->{'io.modelcontextprotocol/protocolVersion'};
-    unless ( defined $version && length $version ) {
-        return _jsonrpc_error(
-            -32602,
-            'Invalid params: missing io.modelcontextprotocol/protocolVersion',
-            $id,
-        );
-    }
+  my $version = $meta->{'io.modelcontextprotocol/protocolVersion'};
+  unless ( defined $version && length $version ) {
+    return _jsonrpc_error(
+      -32602,
+      'Invalid params: missing io.modelcontextprotocol/protocolVersion',
+      $id,
+    );
+  }
 
-    my $supported = $self->supported_versions;
-    unless ( grep { $_ eq $version } @{$supported} ) {
-        return _jsonrpc_error(
-            -32022,
-            'Unsupported protocol version',
-            $id,
-            {
-                supported => $supported,
-                requested => $version,
-            },
-        );
-    }
+  my $supported = $self->supported_versions;
+  unless ( grep { $_ eq $version } @{$supported} ) {
+    return _jsonrpc_error(
+      -32022,
+      'Unsupported protocol version',
+      $id,
+      {
+        supported => $supported,
+        requested => $version,
+      },
+    );
+  }
 
-    unless ( exists $meta->{'io.modelcontextprotocol/clientCapabilities'} ) {
-        return _jsonrpc_error(
-            -32602,
-            'Invalid params: missing io.modelcontextprotocol/clientCapabilities',
-            $id,
-        );
-    }
+  unless ( exists $meta->{'io.modelcontextprotocol/clientCapabilities'} ) {
+    return _jsonrpc_error(
+      -32602,
+      'Invalid params: missing io.modelcontextprotocol/clientCapabilities',
+      $id,
+    );
+  }
 
-    return undef;
+  return undef;
 }
 
 sub _handle_discover {
-    my ( $self, $id ) = @_;
+  my ( $self, $id ) = @_;
 
-    my $result = $self->discover->get;
-    return $self->_jsonrpc_response( $result, $id );
+  my $result = $self->discover->get;
+  return $self->_jsonrpc_response( $result, $id );
 }
 
 sub _handle_tools_list {
-    my ( $self, $id ) = @_;
+  my ( $self, $id ) = @_;
 
-    my $tools = $self->list_tools->get;
-    return $self->_jsonrpc_response(
-        {
-            resultType => 'complete',
-            tools      => $tools,
-            ttlMs      => 300000,
-            cacheScope => 'public',
-        },
-        $id,
-    );
+  my $tools = $self->list_tools->get;
+  return $self->_jsonrpc_response(
+    {
+      resultType => 'complete',
+      tools      => $tools,
+      ttlMs      => 300000,
+      cacheScope => 'public',
+    },
+    $id,
+  );
 }
 
 sub _handle_tools_call {
-    my ( $self, $params, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-    my $name = $params->{name}      // '';
-    my $args = $params->{arguments} // {};
+  my $name = $params->{name}      // '';
+  my $args = $params->{arguments} // {};
 
-    # Protocol error: unknown tool. The spec routes this through JSON-RPC,
-    # not through an isError result, so the model can't retry it as if it
-    # were a recoverable tool failure.
-    my $tool = $self->_find( tools => $name );
-    unless ($tool) {
-        return _jsonrpc_error(
-            -32602,
-            "Invalid params: unknown tool '$name'",
-            $id,
-        );
-    }
-
-    my $result;
-    eval {
-        $result = $self->call_tool($name, $args)->get;
-        1;
-    } or do {
-        # Tool execution error — wrap in isError content block so the model
-        # can see and self-correct, instead of a JSON-RPC error that would
-        # abort the call.
-        return $self->_jsonrpc_response(
-            {
-                resultType => 'complete',
-                content    => [ { type => 'text', text => "$@" } ],
-                isError    => 1,
-            },
-            $id,
-        );
-    };
-
-    # MRTR: a tool may return its own result hashref (e.g. resultType =>
-    # 'input_required'). Pass through unchanged.
-    if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
-        return $self->_jsonrpc_response( $result, $id );
-    }
-
-    # Rich content: a tool may return a hashref carrying its own content
-    # blocks and/or structuredContent (without a resultType). Pass it
-    # through verbatim; _jsonrpc_response fills in resultType => 'complete'.
-    if ( ref $result eq 'HASH'
-        && ( ref $result->{content} eq 'ARRAY'
-            || exists $result->{structuredContent} ) ) {
-        return $self->_jsonrpc_response( $result, $id );
-    }
-
-    # Default wrapping: a tool's plain return value becomes a text content
-    # block inside a complete result. Scalars are stringified; refs are
-    # JSON-encoded so the tool author can return any JSON-shaped data
-    # without having to think about it.
-    my $text = ref $result
-        ? encode_json($result)
-        : ( defined $result ? "$result" : '' );
-
-    return $self->_jsonrpc_response(
-        {
-            resultType => 'complete',
-            content    => [ { type => 'text', text => $text } ],
-        },
-        $id,
+  # Protocol error: unknown tool. The spec routes this through JSON-RPC,
+  # not through an isError result, so the model can't retry it as if it
+  # were a recoverable tool failure.
+  my $tool = $self->_find( tools => $name );
+  unless ($tool) {
+    return _jsonrpc_error(
+      -32602,
+      "Invalid params: unknown tool '$name'",
+      $id,
     );
+  }
+
+  my $result;
+  eval {
+    $result = $self->call_tool($name, $args)->get;
+    1;
+  } or do {
+    # Tool execution error — wrap in isError content block so the model
+    # can see and self-correct, instead of a JSON-RPC error that would
+    # abort the call.
+    return $self->_jsonrpc_response(
+      {
+        resultType => 'complete',
+        content    => [ { type => 'text', text => "$@" } ],
+        isError    => 1,
+      },
+      $id,
+    );
+  };
+
+  # MRTR: a tool may return its own result hashref (e.g. resultType =>
+  # 'input_required'). Pass through unchanged.
+  if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
+    return $self->_jsonrpc_response( $result, $id );
+  }
+
+  # Rich content: a tool may return a hashref carrying its own content
+  # blocks and/or structuredContent (without a resultType). Pass it
+  # through verbatim; _jsonrpc_response fills in resultType => 'complete'.
+  if ( ref $result eq 'HASH'
+    && ( ref $result->{content} eq 'ARRAY'
+      || exists $result->{structuredContent} ) ) {
+    return $self->_jsonrpc_response( $result, $id );
+  }
+
+  # Default wrapping: a tool's plain return value becomes a text content
+  # block inside a complete result. Scalars are stringified; refs are
+  # JSON-encoded so the tool author can return any JSON-shaped data
+  # without having to think about it.
+  my $text = ref $result
+    ? encode_json($result)
+    : ( defined $result ? "$result" : '' );
+
+  return $self->_jsonrpc_response(
+    {
+      resultType => 'complete',
+      content    => [ { type => 'text', text => $text } ],
+    },
+    $id,
+  );
 }
 
 sub _handle_resources_list {
-    my ( $self, $id ) = @_;
+  my ( $self, $id ) = @_;
 
-    my $resources = $self->list_resources->get;
-    return $self->_jsonrpc_response(
-        {
-            resultType => 'complete',
-            resources  => $resources,
-        },
-        $id,
-    );
+  my $resources = $self->list_resources->get;
+  return $self->_jsonrpc_response(
+    {
+      resultType => 'complete',
+      resources  => $resources,
+    },
+    $id,
+  );
 }
 
 sub _handle_resources_read {
-    my ( $self, $params, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-    my $uri = $params->{uri} // '';
+  my $uri = $params->{uri} // '';
 
-    # Protocol error: unknown resource. Routed through JSON-RPC -32602.
-    my $resource = $self->_find( resources => $uri );
-    unless ($resource) {
-        return _jsonrpc_error(
-            -32602,
-            "Invalid params: unknown resource '$uri'",
-            $id,
-        );
-    }
+  # Protocol error: unknown resource. Routed through JSON-RPC -32602.
+  my $resource = $self->_find( resources => $uri );
+  unless ($resource) {
+    return _jsonrpc_error(
+      -32602,
+      "Invalid params: unknown resource '$uri'",
+      $id,
+    );
+  }
 
-    my $result;
-    eval {
-        $result = $self->read_resource($uri)->get;
-        1;
-    } or do {
-        # Resource execution error — a dying code ref or a registered-but-
-        # codeless resource. Unlike tools/call, which routes tool execution
-        # failures into isError content blocks so the model can self-correct,
-        # a resource read failure is a server-side internal error: -32603.
-        return _jsonrpc_error( -32603, "Internal error: $@", $id );
-    };
+  my $result;
+  eval {
+    $result = $self->read_resource($uri)->get;
+    1;
+  } or do {
+    # Resource execution error — a dying code ref or a registered-but-
+    # codeless resource. Unlike tools/call, which routes tool execution
+    # failures into isError content blocks so the model can self-correct,
+    # a resource read failure is a server-side internal error: -32603.
+    return _jsonrpc_error( -32603, "Internal error: $@", $id );
+  };
 
-    return $self->_jsonrpc_response( $result, $id );
+  return $self->_jsonrpc_response( $result, $id );
 }
 
 sub _handle_prompts_list {
-    my ( $self, $id ) = @_;
+  my ( $self, $id ) = @_;
 
-    my $prompts = $self->list_prompts->get;
-    return $self->_jsonrpc_response(
-        {
-            resultType => 'complete',
-            prompts    => $prompts,
-        },
-        $id,
-    );
+  my $prompts = $self->list_prompts->get;
+  return $self->_jsonrpc_response(
+    {
+      resultType => 'complete',
+      prompts    => $prompts,
+    },
+    $id,
+  );
 }
 
 sub _handle_prompts_get {
-    my ( $self, $params, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-    my $name = $params->{name}      // '';
-    my $args = $params->{arguments} // {};
+  my $name = $params->{name}      // '';
+  my $args = $params->{arguments} // {};
 
-    # Protocol error: unknown prompt. Routed through JSON-RPC -32602.
-    my $prompt = $self->_find( prompts => $name );
-    unless ($prompt) {
-        return _jsonrpc_error(
-            -32602,
-            "Invalid params: unknown prompt '$name'",
-            $id,
-        );
-    }
+  # Protocol error: unknown prompt. Routed through JSON-RPC -32602.
+  my $prompt = $self->_find( prompts => $name );
+  unless ($prompt) {
+    return _jsonrpc_error(
+      -32602,
+      "Invalid params: unknown prompt '$name'",
+      $id,
+    );
+  }
 
-    my $result;
-    eval {
-        $result = $self->get_prompt($name, $args)->get;
-        1;
-    } or do {
-        # Prompt execution error — a dying code ref or a registered-but-
-        # codeless prompt. Unlike tools/call, which routes tool execution
-        # failures into isError content blocks so the model can self-correct,
-        # a prompt fetch failure is a server-side internal error: -32603.
-        return _jsonrpc_error( -32603, "Internal error: $@", $id );
-    };
+  my $result;
+  eval {
+    $result = $self->get_prompt($name, $args)->get;
+    1;
+  } or do {
+    # Prompt execution error — a dying code ref or a registered-but-
+    # codeless prompt. Unlike tools/call, which routes tool execution
+    # failures into isError content blocks so the model can self-correct,
+    # a prompt fetch failure is a server-side internal error: -32603.
+    return _jsonrpc_error( -32603, "Internal error: $@", $id );
+  };
 
-    return $self->_jsonrpc_response( $result, $id );
+  return $self->_jsonrpc_response( $result, $id );
 }
 
 sub _jsonrpc_error {
-    my ( $code, $message, $id, $data ) = @_;
-    my $err = { code => $code, message => $message };
-    $err->{data} = $data if defined $data;
-    return {
-        jsonrpc => '2.0',
-        id      => $id,
-        error   => $err,
-    };
+  my ( $code, $message, $id, $data ) = @_;
+  my $err = { code => $code, message => $message };
+  $err->{data} = $data if defined $data;
+  return {
+    jsonrpc => '2.0',
+    id      => $id,
+    error   => $err,
+  };
 }
 
 sub _jsonrpc_response {
-    my ( $self, $result, $id ) = @_;
-    if ( ref $result eq 'HASH' ) {
-        $result->{resultType} //= 'complete';
-        $result->{_meta}{'io.modelcontextprotocol/serverInfo'} = $self->server_info;
-    }
-    return { jsonrpc => '2.0', id => $id, result => $result };
+  my ( $self, $result, $id ) = @_;
+  if ( ref $result eq 'HASH' ) {
+    $result->{resultType} //= 'complete';
+    $result->{_meta}{'io.modelcontextprotocol/serverInfo'} = $self->server_info;
+  }
+  return { jsonrpc => '2.0', id => $id, result => $result };
 }
 
 1;

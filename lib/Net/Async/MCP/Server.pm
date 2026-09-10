@@ -63,6 +63,73 @@ Returns ArrayRef of protocol version strings this server accepts.
 
 =cut
 
+# --- Registry: the three registrable kinds -------------------------------
+#
+# tools, resources and prompts share one storage / lookup / wire-shape
+# mechanism. Each kind names the field its entries are keyed by (used by
+# _find) and the field lists that build its tools/list-style wire shape:
+# `required` fields are copied verbatim, `optional` fields only when defined,
+# and `defaults` supplies a value for a required field the caller omitted
+# (prompts' arguments). register_* keeps its own validation — the required
+# fields, error messages and normalisation genuinely differ per kind — but
+# everything downstream of a stored entry is generic.
+my %REGISTRY = (
+    tools => {
+        key  => 'name',
+        wire => {
+            required => [qw( name description inputSchema )],
+            optional => [qw( title annotations outputSchema )],
+        },
+    },
+    resources => {
+        key  => 'uri',
+        wire => {
+            required => [qw( uri name )],
+            optional => [qw( mimeType description title )],
+        },
+    },
+    prompts => {
+        key  => 'name',
+        wire => {
+            required => [qw( name )],
+            optional => [qw( title description )],
+            defaults => { arguments => sub { [] } },
+        },
+    },
+);
+
+sub _register {
+    my ( $self, $kind, %def ) = @_;
+    push @{ $self->{$kind} //= [] }, \%def;
+    return;
+}
+
+sub _find {
+    my ( $self, $kind, $key ) = @_;
+    my $field = $REGISTRY{$kind}{key};
+    for my $entry ( @{ $self->{$kind} // [] } ) {
+        return $entry if $entry->{$field} eq $key;
+    }
+    return;
+}
+
+sub _wire_shape {
+    my ( $self, $kind, $def ) = @_;
+    my $spec = $REGISTRY{$kind}{wire};
+
+    my %wire;
+    $wire{$_} = $def->{$_} for @{ $spec->{required} };
+    for my $field ( sort keys %{ $spec->{defaults} // {} } ) {
+        $wire{$field} = defined $def->{$field}
+            ? $def->{$field}
+            : $spec->{defaults}{$field}->();
+    }
+    for my $field ( @{ $spec->{optional} } ) {
+        $wire{$field} = $def->{$field} if defined $def->{$field};
+    }
+    return \%wire;
+}
+
 sub configure {
   my ( $self, %params ) = @_;
   if (exists $params{name}) {
@@ -171,8 +238,7 @@ sub register_tool {
     croak "Tool '$tool{name}' requires 'inputSchema'"
         unless exists $tool{inputSchema};
 
-    $self->{tools} //= [];
-    push @{ $self->{tools} }, \%tool;
+    return $self->_register( tools => %tool );
 }
 
 =method register_tool(%tool)
@@ -186,20 +252,7 @@ non-conformant under MCP 2026-07-28.
 
 async sub list_tools {
     my ( $self ) = @_;
-    return [ map { $self->_tool_wire_shape($_) } @{ $self->{tools} // [] } ];
-}
-
-sub _tool_wire_shape {
-    my ( $self, $tool ) = @_;
-    my %t = (
-        name        => $tool->{name},
-        description => $tool->{description},
-        inputSchema => $tool->{inputSchema},
-    );
-    $t{title}        = $tool->{title}        if defined $tool->{title};
-    $t{annotations}  = $tool->{annotations}  if defined $tool->{annotations};
-    $t{outputSchema} = $tool->{outputSchema} if defined $tool->{outputSchema};
-    return \%t;
+    return [ map { $self->_wire_shape( tools => $_ ) } @{ $self->{tools} // [] } ];
 }
 
 =method list_tools
@@ -212,7 +265,7 @@ shape (C<inputSchema>, not C<input_schema>).
 async sub call_tool {
     my ( $self, $name, $arguments ) = @_;
 
-    my $tool = $self->_find_tool($name);
+    my $tool = $self->_find( tools => $name );
     croak "No tool registered: $name" unless $tool;
 
     if (my $code = $tool->{code}) {
@@ -222,14 +275,6 @@ async sub call_tool {
     }
 
     croak "Tool '$name' has no implementation";
-}
-
-sub _find_tool {
-    my ( $self, $name ) = @_;
-    for my $tool (@{ $self->{tools} // [] }) {
-        return $tool if $tool->{name} eq $name;
-    }
-    return;
 }
 
 =method call_tool($name, $arguments)
@@ -287,8 +332,7 @@ sub register_resource {
     croak q{register_resource requires 'uri'}  unless defined $resource{uri};
     croak q{register_resource requires 'name'} unless defined $resource{name};
 
-    $self->{resources} //= [];
-    push @{ $self->{resources} }, \%resource;
+    return $self->_register( resources => %resource );
 }
 
 =method register_resource(%resource)
@@ -301,19 +345,7 @@ URI when the resource is read.
 
 async sub list_resources {
     my ( $self ) = @_;
-    return [ map { $self->_resource_wire_shape($_) } @{ $self->{resources} // [] } ];
-}
-
-sub _resource_wire_shape {
-    my ( $self, $resource ) = @_;
-    my %r = (
-        uri  => $resource->{uri},
-        name => $resource->{name},
-    );
-    $r{mimeType}    = $resource->{mimeType}    if defined $resource->{mimeType};
-    $r{description} = $resource->{description} if defined $resource->{description};
-    $r{title}       = $resource->{title}       if defined $resource->{title};
-    return \%r;
+    return [ map { $self->_wire_shape( resources => $_ ) } @{ $self->{resources} // [] } ];
 }
 
 =method list_resources
@@ -327,7 +359,7 @@ C<title>).
 async sub read_resource {
     my ( $self, $uri ) = @_;
 
-    my $resource = $self->_find_resource($uri);
+    my $resource = $self->_find( resources => $uri );
     croak "No resource registered: $uri" unless $resource;
 
     my $result;
@@ -353,14 +385,6 @@ async sub read_resource {
     $content->{mimeType} = $resource->{mimeType} if defined $resource->{mimeType};
 
     return { contents => [ $content ] };
-}
-
-sub _find_resource {
-    my ( $self, $uri ) = @_;
-    for my $resource ( @{ $self->{resources} // [] } ) {
-        return $resource if $resource->{uri} eq $uri;
-    }
-    return;
 }
 
 =method read_resource($uri)
@@ -390,8 +414,7 @@ sub register_prompt {
     my ( $self, %prompt ) = @_;
     croak q{register_prompt requires 'name'} unless defined $prompt{name};
 
-    $self->{prompts} //= [];
-    push @{ $self->{prompts} }, \%prompt;
+    return $self->_register( prompts => %prompt );
 }
 
 =method register_prompt(%prompt)
@@ -404,18 +427,7 @@ arguments when the prompt is fetched.
 
 async sub list_prompts {
     my ( $self ) = @_;
-    return [ map { $self->_prompt_wire_shape($_) } @{ $self->{prompts} // [] } ];
-}
-
-sub _prompt_wire_shape {
-    my ( $self, $prompt ) = @_;
-    my %p = (
-        name      => $prompt->{name},
-        arguments => $prompt->{arguments} // [],
-    );
-    $p{title}       = $prompt->{title}       if defined $prompt->{title};
-    $p{description} = $prompt->{description} if defined $prompt->{description};
-    return \%p;
+    return [ map { $self->_wire_shape( prompts => $_ ) } @{ $self->{prompts} // [] } ];
 }
 
 =method list_prompts
@@ -428,7 +440,7 @@ shape (C<name>, C<arguments>, and the optional C<title>, C<description>).
 async sub get_prompt {
     my ( $self, $name, $arguments ) = @_;
 
-    my $prompt = $self->_find_prompt($name);
+    my $prompt = $self->_find( prompts => $name );
     croak "No prompt registered: $name" unless $prompt;
 
     my $result;
@@ -459,14 +471,6 @@ async sub get_prompt {
     };
 }
 
-sub _find_prompt {
-    my ( $self, $name ) = @_;
-    for my $prompt ( @{ $self->{prompts} // [] } ) {
-        return $prompt if $prompt->{name} eq $name;
-    }
-    return;
-}
-
 =method get_prompt($name, $arguments)
 
 Called when a client fetches a prompt. Looks up C<$name> in the prompt
@@ -479,6 +483,19 @@ arrayref is passed through verbatim; any other return value is stringified
 into a single C<user> text message.
 
 =cut
+
+# JSON-RPC method -> handler, tried once per-request _meta has validated. Each
+# entry is invoked as $self->$handler( $request, $id ) and pulls whatever it
+# needs (params, id) from those; this map replaces the former if/elsif ladder.
+my %DISPATCH = (
+    'server/discover' => sub { $_[0]->_handle_discover( $_[2] ) },
+    'tools/list'      => sub { $_[0]->_handle_tools_list( $_[2] ) },
+    'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2] ) },
+    'resources/list'  => sub { $_[0]->_handle_resources_list( $_[2] ) },
+    'resources/read'  => sub { $_[0]->_handle_resources_read( $_[1]->{params} // {}, $_[2] ) },
+    'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[2] ) },
+    'prompts/get'     => sub { $_[0]->_handle_prompts_get( $_[1]->{params} // {}, $_[2] ) },
+);
 
 sub handle {
     my ( $self, $request, $context ) = @_;
@@ -503,26 +520,8 @@ sub handle {
             return $err;
         }
 
-        if ( $method eq 'server/discover' ) {
-            return $self->_handle_discover($id);
-        }
-        elsif ( $method eq 'tools/list' ) {
-            return $self->_handle_tools_list($id);
-        }
-        elsif ( $method eq 'tools/call' ) {
-            return $self->_handle_tools_call( $request->{params} // {}, $id );
-        }
-        elsif ( $method eq 'resources/list' ) {
-            return $self->_handle_resources_list($id);
-        }
-        elsif ( $method eq 'resources/read' ) {
-            return $self->_handle_resources_read( $request->{params} // {}, $id );
-        }
-        elsif ( $method eq 'prompts/list' ) {
-            return $self->_handle_prompts_list($id);
-        }
-        elsif ( $method eq 'prompts/get' ) {
-            return $self->_handle_prompts_get( $request->{params} // {}, $id );
+        if ( my $handler = $DISPATCH{$method} ) {
+            return $self->$handler( $request, $id );
         }
 
         return _jsonrpc_error( -32601, "Method '$method' not found", $id );
@@ -609,7 +608,7 @@ sub _handle_legacy_tools_call {
     my $name = $params->{name}      // '';
     my $args = $params->{arguments} // {};
 
-    my $tool = $self->_find_tool($name);
+    my $tool = $self->_find( tools => $name );
     unless ($tool) {
         return _jsonrpc_error(
             -32602,
@@ -870,7 +869,7 @@ sub _handle_tools_call {
     # Protocol error: unknown tool. The spec routes this through JSON-RPC,
     # not through an isError result, so the model can't retry it as if it
     # were a recoverable tool failure.
-    my $tool = $self->_find_tool($name);
+    my $tool = $self->_find( tools => $name );
     unless ($tool) {
         return _jsonrpc_error(
             -32602,
@@ -948,7 +947,7 @@ sub _handle_resources_read {
     my $uri = $params->{uri} // '';
 
     # Protocol error: unknown resource. Routed through JSON-RPC -32602.
-    my $resource = $self->_find_resource($uri);
+    my $resource = $self->_find( resources => $uri );
     unless ($resource) {
         return _jsonrpc_error(
             -32602,
@@ -992,7 +991,7 @@ sub _handle_prompts_get {
     my $args = $params->{arguments} // {};
 
     # Protocol error: unknown prompt. Routed through JSON-RPC -32602.
-    my $prompt = $self->_find_prompt($name);
+    my $prompt = $self->_find( prompts => $name );
     unless ($prompt) {
         return _jsonrpc_error(
             -32602,

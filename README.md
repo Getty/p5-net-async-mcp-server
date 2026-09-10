@@ -422,7 +422,9 @@ defaulting to `\*STDIN` and `\*STDOUT`. See
         path   => '/mcp',
     );
     $loop->add($http);
-    $http->listen;
+
+    my $app = $http->to_app;   # primary entry: mount under any PSGI server
+    $http->listen;             # ...or a quick blocking local bring-up
 
 The Streamable HTTP transport from MCP 2026-07-28. A conforming client
 POSTs every JSON-RPC request or notification to a single endpoint (the
@@ -441,8 +443,13 @@ closed.
 The transport is a thin wrapper around `Net::Async::MCP::Server::handle`;
 method implementations live in
 [Net::Async::MCP::Server](https://metacpan.org/pod/Net::Async::MCP::Server).
-For `Plack::Test`-driven testing or any other PSGI host, use
-`$http->to_app`. See
+`$http->to_app` is the primary entry point — a PSGI app you can mount under
+any PSGI server, including an async-capable one on the same loop, or behind a
+reverse proxy — and it is what `Plack::Test` drives in the test suite.
+`$http->listen` is a convenience wrapper that runs that app under
+`HTTP::Server::PSGI`'s own blocking accept loop for a quick local bring-up; it
+blocks the event loop, so a native async listener is left to a future ticket.
+See
 [Net::Async::MCP::Server::Transport::StreamableHTTP](https://metacpan.org/pod/Net::Async::MCP::Server::Transport::StreamableHTTP)
 for the full list of options.
 

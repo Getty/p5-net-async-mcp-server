@@ -32,6 +32,12 @@ our $VERSION = '0.002';
         origin_allow => [ 'https://app.example.com' ],
     );
     $loop->add($http);
+
+    # Primary entry point: a PSGI app you can mount under any PSGI server
+    # (including an async-capable one on the same loop) or a reverse proxy.
+    my $app = $http->to_app;
+
+    # ...or, for a quick blocking local bring-up, the convenience wrapper:
     $http->listen;
 
 =head1 DESCRIPTION
@@ -148,9 +154,8 @@ sub server { $_[0]->{server} }
 
     my $host = $transport->host;
 
-Returns the interface to bind on. Defaults to C<127.0.0.1>. Non-loopback binds
-emit a warning unless the caller has set up C<disable_loopback_warning> (see
-L</listen>).
+Returns the interface to bind on. Defaults to C<127.0.0.1>. A non-loopback
+bind emits a warning from L</listen> unless C<allow_external_bind> is passed.
 
 =cut
 
@@ -190,12 +195,19 @@ sub origin_allow { $_[0]->{origin_allow} || [] }
 
 =method to_app
 
-    my $psgi = $transport->to_app;
-    my $res  = $psgi->($env);
+    my $app = $transport->to_app;
+    my $res = $app->($env);
 
-Returns the PSGI coderef that handles a single request. Useful for
-C<HTTP::Server::PSGI>-driven bring-up and C<Plack::Test>-driven testing;
-production deployments normally wrap this in a reverse proxy.
+Returns the PSGI application coderef, and is the primary way to run this
+transport. Mount it under any PSGI server — an async-capable one driven by
+the same L<IO::Async> loop, or a plain one behind a reverse proxy in
+production — and the whole request path, C<application/json> and SSE alike,
+runs through it. It is also what L<Plack::Test> drives in the test suite and
+what L</listen> runs internally.
+
+Unlike L</listen>, C<to_app> brings no accept loop of its own and so does not
+block the event loop: the server hosting the app owns how requests are
+accepted.
 
 =cut
 
@@ -213,12 +225,15 @@ sub to_app {
 
     $http->listen;
 
-Binds on the configured C<host:port> using L<HTTP::Server::PSGI> and starts
-accepting requests. Blocks the caller and the event loop with it: the loop is
-not yet wired into the accept loop. Unlike
+A convenience wrapper around L</to_app> for a quick local bring-up: it binds
+the configured C<host:port> with L<HTTP::Server::PSGI> and runs the app under
+that server's own accept loop. That accept loop is an ordinary blocking one,
+so C<listen> blocks both the caller and the L<IO::Async> loop — unlike
 L<Net::Async::MCP::Server::Transport::Stdio/handle_requests>, which reads
-through the loop and leaves other notifiers running, nothing else in the loop
-gets a turn here. A real async bring-up is a future ticket.
+through the loop and leaves other notifiers running, nothing else in this loop
+gets a turn while C<listen> is up. To share the loop, run L</to_app> under an
+async-capable PSGI server instead; a native L<IO::Async::Listener> bring-up is
+left to a future ticket.
 
 A non-loopback bind is warned about, since exposing an MCP server on a public
 interface is almost always accidental and unauthenticated; pass

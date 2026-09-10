@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-10T02:15:16Z
+claimed_by: worker-b
+class: standard
+completed: 2026-09-10T02:15:16Z
+created: 2026-09-01T19:51:19Z
+id: 35
+priority: low
+started: 2026-09-10T01:31:59Z
+status: done
+tags:
+- http
+- security
+- decision
+title: 'StreamableHTTP: Origin-Default ''allow any'' – Maintainer-Entscheidung'
+updated: 2026-09-10T02:15:16Z
+---
+
+## Befund
+
+Leere `origin_allow`-Liste bedeutet "jede Origin erlaubt" und ist so dokumentiert. Spec (streamable-http, Security): "Servers MUST validate the Origin header on all incoming connections to prevent DNS rebinding attacks." Ein Browser-Request von einer fremden Origin gegen einen lokal gebundenen Server kommt heute durch.
+
+## Optionen
+
+a) Default: Requests ohne Origin-Header, sowie mit Origin auf einem Loopback-Host (`http://localhost[:port]`, `http://127.0.0.1[:port]`, `http://[::1][:port]`) erlauben; alles andere 403 — es sei denn, `origin_allow` ist gesetzt, dann gilt nur die Liste. Empfehlung.
+b) Status quo, aber im POD als Sicherheitswarnung markieren und `origin_allow` in der SYNOPSIS immer setzen.
+
+Erst entscheiden, dann umsetzen (Tests t/03, POD `origin_allow`, README, Changes). Nicht ohne Entscheidung ändern.
+
+Agent: nach Entscheidung mcp-server-worker.
+
+Erledigt und verifiziert (Worker B): User-Entscheidung Option b Status quo plus POD-Warnung - Verhalten unveraendert, leere origin_allow-Liste als DNS-Rebinding-Risiko in POD markiert, origin_allow in SYNOPSIS gesetzt. POD plus README plus Changes. Kein t/03-Change. Commit 7d7a746. 96 dzil gruen. Lokal, kein Push.

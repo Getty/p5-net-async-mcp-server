@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-10T02:14:42Z
+claimed_by: worker-b
+class: standard
+completed: 2026-09-10T02:14:42Z
+created: 2026-09-01T19:51:31Z
+id: 37
+priority: low
+started: 2026-09-10T01:31:46Z
+status: done
+tags:
+- style
+title: 'Hausstil: croak, bare return, Imports, lazy require, Einrückung (Entscheidung)'
+updated: 2026-09-10T02:14:42Z
+---
+
+Rein mechanisch, keine Verhaltensänderung; `prove -l t/` muss unverändert grün bleiben. Aus dem Standards-Review gegen getty-perl-core.
+
+- `die` → `croak` (Carp) in `register_resource`, `register_prompt`, `read_resource`, `get_prompt`; wenn schon dabei, auch Bestand `register_tool`/`call_tool`.
+- `return undef` → bare `return` in `_find_tool`, `_find_resource`, `_find_prompt`.
+- Doppelquotes ohne Interpolation → Einfachquotes (z.B. `"register_resource requires 'uri'"`).
+- Unbenutzte Imports: `Scalar::Util qw(blessed)` in StreamableHTTP.pm, `Future::AsyncAwait` in Stdio.pm. (Server.pm braucht `blessed` nach k30 — dort importieren.)
+- `require HTTP::Server::PSGI` in `listen` → `use` am Modulkopf; ist ohnehin Runtime-Dependency im cpanfile.
+- Tests: `_req` aus t/02 nach t/05 kopiert, und jeder params-Override wiederholt den `_meta`-Block (t/02 7x, t/05 6x) → `_params(%extra)`-Helper je Datei.
+
+**Einrückung — Maintainer-Entscheidung, nicht mitteln:** neuer Code in Server.pm und StreamableHTTP.pm hat 4 Spaces, Hausregel sagt 2, die Dateien sind gemischt (`configure` 2, Rest 4). Entweder beide Dateien auf 2 normalisieren (eigener Commit, whitespace-only) oder die Ausnahme in CLAUDE.md festschreiben.
+
+Nach den Fix-Tickets erledigen, damit die Diffs klein bleiben. Agent: mcp-server-worker.
+
+Erledigt und verifiziert (Worker B): house-style Fixes - croak, bare return, single-quotes bzw q-Form, unbenutzte Imports raus, require am Modulkopf. Commit 057c8a8. PLUS separater whitespace-only 2-Spaces-Commit ea3acb1, per git diff -w gegen parent als rein Whitespace verifiziert. Uebersprungen: blessed-Import in Server.pm nicht ergaenzt, da Server.pm kein blessed nutzt sondern ref. 93 prove / 96 dzil gruen. Lokal, kein Push.

@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-09-10T02:14:50Z
+claimed_by: worker-b
+class: standard
+completed: 2026-09-10T02:14:50Z
+created: 2026-09-01T19:51:36Z
+id: 38
+priority: low
+started: 2026-09-10T01:31:50Z
+status: done
+tags:
+- refactor
+- optional
+title: 'Refactor (optional): Tools/Resources/Prompts-Triade und handle()-Dispatch
+  entdoppeln'
+updated: 2026-09-10T02:14:50Z
+---
+
+## Befund (Smell, Ermessen)
+
+Sechs Formen dreifach: `register_*`, `_find_*`, `_*_wire_shape` (Optional-Key-Kopie), `_handle_*_list`, Lookup-dann--32602 in den drei Call-Handlern, "code or die 'has no implementation'" in `call_tool`/`read_resource`/`get_prompt`. `handle()` hat eine siebenarmige if/elsif-Kette auf `$method`; `%NAME_PARAM` im HTTP-Transport zeigt die Map-Form bereits.
+
+## Vorschlag
+
+- Generischer Registry-Helper: `_register($kind, $key_field, %def)`, `_find($kind, $key)`; Wire-Shape über eine Feldliste je Art (Pflicht + optionale Keys).
+- Dispatch-Map `my %DISPATCH = ('server/discover' => '_handle_discover', ...)` in `handle()`.
+- Öffentliche API unverändert: `register_tool/resource/prompt`, `tools/resources/prompts`, `list_*`, `call_tool`, `read_resource`, `get_prompt`, `handle`.
+
+Nur wenn der Maintainer es will, und erst nach den Fix-Tickets. Tests müssen unverändert grün bleiben — kein Test-Claim ändert sich.
+
+Agent: mcp-server-worker.
+
+Erledigt und verifiziert (Worker B): Dispatch-Refactor - generischer register/find-Helper, Feldlisten-Wire-Shape, DISPATCH-Map statt if-elsif-Kette in handle. Oeffentliche API unveraendert, kein Test-Claim geaendert, 93 prove / 96 dzil gruen (unabhaengig nachgelaufen). Commit bd58b34. Lokal, kein Push.

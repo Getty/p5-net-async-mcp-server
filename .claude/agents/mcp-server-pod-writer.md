@@ -5,9 +5,9 @@ model: sonnet
 allowed-tools: Read, Edit, Grep, Glob
 briefing:
   skills:
-    - getty-perl-release-author-getty
     - getty-perl-core
     - perl-mcp
+    - getty-perl-pod
 ---
 
 You are the mcp-server-pod-writer for **Net::Async::MCP::Server**.

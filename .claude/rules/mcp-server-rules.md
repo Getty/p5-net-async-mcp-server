@@ -33,7 +33,7 @@ This rule depends on whether the Agent/Task tool is available to you.
 
 - **You can spawn subagents** (orchestrating main agent): Do NOT touch behavior-relevant
   code yourself — delegate to `mcp-server-worker`. Your lane: coordinate, inspect, plan,
-  review diffs, run tests, manage git, edit non-behavioral docs. When in doubt, delegate.
+  review diffs, run tests, edit non-behavioral docs. When in doubt, delegate.
   Why: only the `mcp-server-*` agents get their skills force-loaded via `briefing.skills`;
   you get no briefing and would touch the protocol internals with too little context.
 
@@ -42,7 +42,7 @@ This rule depends on whether the Agent/Task tool is available to you.
   | Implement / refactor / debug behavior-relevant code | `mcp-server-worker` (default) |
   | Write/extend tests | `mcp-server-test-writer` |
   | POD in the house format (`=method`/`=attr`) + README.md | `mcp-server-pod-writer` |
-  | Pre-release audit | `mcp-server-release-checker` |
+  | Commits, `Changes`, card → done, pre-release audit | `mcp-server-release-manager` |
 
 - **You cannot spawn subagents** (you ARE an `mcp-server-*` agent): The delegation lock
   does not apply to you — implement, refactor, debug, and test per these rules.
@@ -52,10 +52,13 @@ registry and `call_tool` semantics, `initialize` / capability negotiation, the S
 transport loop, Future and error semantics, tests, performance. Pure prose docs, POD
 wording, and `Changes` notes are not.
 
+**Only `mcp-server-release-manager` commits.** A worker leaves a commit-ready tree and hands its card
+to `review`; you then dispatch `mcp-server-release-manager` to cut the commit and close the card.
+
 ## Coordination — karr board (always in scope)
 
 Ticket coordination is the orchestrating agent's job, so `karr` is always in scope —
-don't invoke the `kanban-issues-karr-cli` skill first, just use it. Git-native kanban; state lives in
+don't invoke the `kanban-issues-karr-coordination` skill first, just use it. Git-native kanban; state lives in
 `refs/karr/*`. This repo has its own board — no cross-repo handoff, but see the sibling
 note below. Day-to-day:
 

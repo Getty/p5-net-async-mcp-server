@@ -2,7 +2,6 @@
 name: mcp-server-test-writer
 description: "Write Net::Async::MCP::Server tests with Test2::V0 — protocol-level assertions against handle() and the tool registry, no spawned processes and no network. Use for test additions, regression scaffolding, and reproducing JSON-RPC dispatch bugs."
 model: sonnet
-allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
     - getty-perl-core

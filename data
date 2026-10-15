@@ -1,0 +1,47 @@
+---
+claimed_at: 2026-10-15T16:15:49Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:15:49Z
+created: 2026-10-06T19:46:12Z
+id: 42
+priority: high
+started: 2026-10-15T04:48:48Z
+status: done
+tags:
+- bug
+- http
+- spec
+- release
+- review-2026-10-06
+title: k32 und k33 stehen auf done, ihre Commits liegen aber nur auf dem Branch worktree-streamable-http-fixes
+updated: 2026-10-15T16:15:49Z
+---
+
+## Befund
+
+k32 (HTTP-Status 400/404 für JSON-RPC-Fehler aus `handle()`) und k33 (Mcp-Param-Vergleich nach JSON-Typ) sind auf dem Board `done`. Ihre Commits `1c7ad3c` und `dff86d9` liegen aber ausschließlich auf dem lokalen Branch `worktree-streamable-http-fixes` (Merge-Base `0afdeb5`); `git log main..worktree-streamable-http-fixes` zeigt genau diese zwei, das zugehörige Worktree existiert nicht mehr. `main` hat seither k40, k37 (Neu-Einrückung auf 2 Spaces), k38 (Dispatch-Refactor), k17 und k35 bekommen, die Fixes nie.
+
+## Wirkung auf main (nachgestellt)
+
+- `lib/Net/Async/MCP/Server/Transport/StreamableHTTP.pm:438` gibt jede `handle()`-Antwort über `_json_response` mit **200** zurück. Probe über `to_app`: unbekannte Methode liefert `200 {"error":{"code":-32601,...}}`, die Spec verlangt 404 (und 400 für -32022 / fehlende `_meta`-Pflichtfelder). Der Schwester-Client `~/dev/p5-net-async-mcp` (`Transport/HTTP.pm` um Zeile 387 und 971) erwartet 400/404 bereits.
+- `StreamableHTTP.pm:554-557` vergleicht weiterhin `"$decoded" eq "$body_value"`. Probe: Tool mit `flag` (boolean, `x-mcp-header: Flag`), Body `arguments.flag = true`, Header `Mcp-Param-Flag: true` wird mit `400 -32020 Header mismatch` abgelehnt, weil JSON-true zu `1` stringifiziert. Genau der Interop-Fehler mit Net::Async::MCP, den k33 beschreibt.
+- `t/03-streamable-http.t:170` und `:649` behaupten auf main noch `200 OK (JSON-RPC error, not an HTTP error)`, also das Gegenteil der Spec.
+- `Changes` und `README.md` auf main tragen die Einträge der beiden Karten nicht.
+
+## Fertig
+
+- Beide Commits auf `main` gebracht (Cherry-pick oder Neu-Anwendung; wegen k37-Einrückung und k38-Refactor ist mit Konflikten in `StreamableHTTP.pm` und `t/03-streamable-http.t` zu rechnen).
+- Die Tests aus beiden Commits laufen auf main grün, die zwei falschen 200-Claims sind korrigiert.
+- Changes- und README-Einträge (Error-Codes mit HTTP-Status) sind da.
+- Branch `worktree-streamable-http-fixes` danach gelöscht.
+- k39 (x-mcp-header aus dem Schema erzwingen) hängt an k33 und sollte erst danach angefasst werden.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-15 04:51 Commit 03b358c auf worktree-karr-backlog (Basis main 48db14d): k32 (HTTP 400/404 via _http_status_for_response) + k33 (_header_value_matches, JSON-Typ-Vergleich) neu auf main angewendet; t/03 Claims 200->400/404 korrigiert; Changes+README. Rot/grün: 6 Subtests von t/03 gegen unverändertes main-lib rot, mit Änderung prove -lr t grün (7 Dateien/102 Tests). Alt-Branch worktree-streamable-http-fixes gelöscht. Offen/Randbefund: k32-Test 'missing clientCapabilities -> 400' ist gegen main-lib nicht rot (handle() prüft das seit k40 schon, Server.pm:830); transportseitiger _meta_has ist vermutlich redundant - Maintainer-Entscheidung. Sibling Net::Async::MCP erwartet 400/404 bereits, nichts nachzuziehen. k39 ist jetzt freigegeben.
+
+2026-10-15 16:05 Nachtrag: _meta_has NICHT entfernt, nicht redundant. Bei Wegfall liefert handle() zwar dasselbe -32602, aber _http_status_for_response mappt -32602 auf 200 (Test 'missing clientCapabilities -> 400' würde rot), und die Prüfreihenfolge vor Mcp-Method/Mcp-Name ändert sich. Kommentar im Code nennt das als Absicht. Empfehlung: Check lassen (A); Alternative B: Status-Mapping für -32602 'missing ...' auf 400 erweitern (Verhaltensänderung, von Getty zu entscheiden).
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

@@ -1,0 +1,36 @@
+---
+claimed_at: 2026-10-15T16:15:27Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:15:27Z
+created: 2026-09-01T19:51:26Z
+id: 36
+priority: medium
+started: 2026-10-15T05:03:17Z
+status: done
+tags:
+- docs
+title: 'Doku-Drift: Known-gaps-Liste, Sibling-Pfad, POD und Kommentare'
+updated: 2026-10-15T16:15:27Z
+---
+
+Alles Nicht-Verhalten; POD/README an mcp-server-pod-writer, Agent-Datei, CLAUDE.md und Rules sind Hauptagent-Lane.
+
+- **.claude/agents/mcp-server-worker.md, Abschnitt "Known gaps"**: alle Punkte veraltet (Stream-basiertes handle_requests seit a44716f, kein `_handle_initialize`, `inputSchema`, Content-Wrapping, 2026-07-28-Negotiation, `SUPER::configure`, kein `$context`). Ersetzen durch die tatsächlichen Lücken: `listen()` blockiert den Loop (k17), Stdio-Write ist blockierender print (k18), `handle()` ist synchron und ruft `->get`, kein Push-Kanal (k24), keine Pagination (k25), Origin-Default offen (k35). Ebenso den Satz "README dokumentiert 0.001" prüfen und streichen.
+- **CLAUDE.md und .claude/rules/mcp-server-rules.md**: Sibling-Pfad `~/dev/perl/p5-net-async-mcp` → `~/dev/p5-net-async-mcp` (zweimal).
+- **Server.pm, handle-POD**: "Despite dispatching to the async sub methods discover, list_tools and call_tool" → alle sieben nennen (README hat es schon).
+- **Server.pm, register_tool-POD**: `title`, `annotations`, `outputSchema` dokumentieren (werden seit dem letzten Diff durchgereicht, Changes verspricht es).
+- **StreamableHTTP.pm, host-POD**: nennt `disable_loopback_warning`; die Option heißt `allow_external_bind`.
+- **StreamableHTTP.pm, Kommentar über `_handle_sse_stream`**: "Keepalives are pointlessly short-circuited" — Keepalive existiert nicht mehr.
+- **StreamableHTTP.pm, `_lookup_psgi_header`**: Kommentar verspricht einen case-insensitiven Fallback, den die Funktion nicht hat.
+- **StreamableHTTP.pm**: "deferred to karr #24" → `k24` (Skill-Konvention, `#24` löst GitHub gegen Issues auf).
+- **Stdio.pm, handle_requests-Kommentar**: "A tool that dies still propagates" → nach k29 anpassen.
+- **README.md**: nach k32 Error-Codes-Abschnitt um HTTP-Status ergänzen; nach k30 call_tool-Absatz um Future-Return.
+
+Reihenfolge: nach k29, k30, k32, damit die Doku den Endstand beschreibt.
+
+Aus der Fleet-Runde k37/k38/k17/k35 (Worker B): 1) Der host-POD-Punkt disable_loopback_warning statt allow_external_bind wurde bereits inline korrigiert waehrend k17, Commit 1157ec2 - bei Bearbeitung von k36 abhaken. 2) Der Known-gaps-Befund in mcp-server-worker.md ist bestaetigt weiter aktuell: die Liste beschreibt den Vor-Migrations-Stand mit initialize hardcoded, STDIN-Loop, input_schema, protocolVersion 2025-11-25 und passt nicht zum 0.002-Stand mit discover und _meta. Rest von k36 unveraendert offen.
+
+2026-10-15 05:04 Commit 4ec9677. Erledigt: Known-gaps-Liste in mcp-server-worker.md neu (k17/k41, k18, k24, k25, k35-Status), 0.001-Satz gestrichen, Sibling-Pfad -> ~/dev/p5-net-async-mcp in CLAUDE.md/rules/agent-Datei, rules-Hazard 'Stdio nicht async' aktualisiert; handle-POD nennt alle sieben Methoden, register_tool/list_tools-POD (title/annotations/outputSchema), SSE-/_lookup_psgi_header-/Stdio-Kommentare korrigiert, k24-Referenz, README um x-mcp-header-Erzwingung ergänzt, Changes-Zeile. Schon erledigt: host-POD allow_external_bind, README-Error-Codes/HTTP-Status, call_tool-Future. Reine Doku: kein roter Test möglich; prove -lr t für diesen Commit wegen loadguard nicht gelaufen (nur Kommentare/POD, vorige Läufe grün 114 Tests). Randbefund: README call_tool-Liste nennt content/structuredContent-Durchreichung nicht.
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), reine Doku, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

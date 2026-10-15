@@ -97,11 +97,11 @@ user explicitly says to handle a specific item; every write is confirmed first.
   distribution; the `perl-mcp` skill describes that one and is protocol reference only.
   Don't "reuse" an API from it that this code has never called.
 - **The sibling client dist is a separate repo.** `Net::Async::MCP`
-  (`~/dev/perl/p5-net-async-mcp`) is the client half these two are meant to interoperate
+  (`~/dev/p5-net-async-mcp`) is the client half these two are meant to interoperate
   with. Read it to check wire format; never edit it from this session.
-- **The Stdio transport is not actually async.** `handle_requests` blocks on
-  `while (<STDIN>)` and the dispatch path calls `->get` on the `async sub`s. Treat any
-  claim of concurrency here as false until that changes — full list of known gaps in
+- **The dispatch path is not actually concurrent.** `handle()` calls `->get` on the
+  `async sub`s and the Stdio response write is a blocking `print` (k18). Treat any claim
+  of concurrency here as false until that changes — full list of known gaps in
   `.claude/agents/mcp-server-worker.md`.
 
 ## Perl specifics — reference, don't restate

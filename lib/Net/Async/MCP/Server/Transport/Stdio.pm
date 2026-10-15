@@ -191,9 +191,11 @@ sub handle_requests {
 
     $self->add_child($stream);
 
-    # A tool that dies still propagates out of handle() and thus out of here,
-    # as it did from the readline loop this replaced — but the stream has to
-    # come back out of the loop either way.
+    # A tool that dies no longer reaches here: handle() catches it and
+    # answers with an isError result (resources/prompts: -32603). Only an
+    # exception outside those evals, e.g. from list_tools, still propagates
+    # out of handle() and thus out of here — and the stream has to come back
+    # out of the loop either way.
     my $ok  = eval { $eof_f->get; 1 };
     my $err = $@;
 

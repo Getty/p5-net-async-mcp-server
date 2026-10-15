@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - Documentation: handle() POD lists all seven dispatched methods;
+    register_tool/list_tools document title, annotations and outputSchema;
+    StreamableHTTP and Stdio comments corrected; README documents
+    x-mcp-header enforcement.
+
   - prompts/get checks required arguments: a registered argument with a true
     "required" that is not defined in params.arguments returns -32602
     "Invalid params: missing required argument 'x'" before the prompt code

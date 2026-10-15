@@ -233,6 +233,10 @@ legacy `input_schema` alias), and an optional `code` reference. The
 `inputSchema` is required — tools without a parameter schema are
 non-conformant under MCP 2026-07-28.
 
+The optional `title`, `annotations` and `outputSchema` keys are passed
+through unchanged into the tool's wire shape in `tools/list` when defined,
+and omitted from it otherwise.
+
 ## tools
 
     my $tools = $server->tools;
@@ -244,7 +248,8 @@ Returns the ArrayRef of registered tool definitions (internal storage shape).
     my $tools = $server->list_tools->get;
 
 Returns a `Future` that resolves to the ArrayRef of tool definitions in
-wire shape (`inputSchema`, not `input_schema`).
+wire shape (`name`, `description`, `inputSchema`, not `input_schema`, and the
+optional `title`, `annotations`, `outputSchema` when set).
 
 ## call_tool
 
@@ -442,7 +447,10 @@ MCP endpoint, by default `/mcp`) and sets the request-metadata headers
 the spec defines: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for
 `tools/call`, `resources/read`, `prompts/get`), and `Mcp-Param-{Name}`
 for any tool argument annotated with `x-mcp-header: "{Name}"` in its
-`inputSchema`. These header checks apply only to requests that carry an
+`inputSchema`. The transport enforces those annotations from the registered
+tool's schema: when an annotated property holds a non-null value in
+`arguments`, the matching `Mcp-Param-{Name}` header must be present, or the
+request is rejected with HTTP 400 and `-32020`. These header checks apply only to requests that carry an
 `id` — a notification skips them and goes straight to `handle()`. Any
 header/body divergence returns JSON-RPC `-32020 HeaderMismatch`. The
 transport answers each request as `application/json` (default) or as

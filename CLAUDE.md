@@ -12,7 +12,7 @@ the next release).
 
 **This is a standalone implementation** — it does not build on SRI's `MCP` /
 `MCP::Server` distribution. The sibling dist `Net::Async::MCP`
-(`~/dev/perl/p5-net-async-mcp`) is the *client* half the two are meant to interoperate
+(`~/dev/p5-net-async-mcp`) is the *client* half the two are meant to interoperate
 with; it lives in its own repo and is never edited from here.
 
 ## Protocol

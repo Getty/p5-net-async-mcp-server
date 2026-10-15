@@ -32,7 +32,7 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
   format, handler semantics), never as an API this code calls. Everything here is a
   standalone implementation on `IO::Async::Notifier` + `Future::AsyncAwait`.
 - **The sibling dist is the client half**: `Net::Async::MCP` at
-  `~/dev/perl/p5-net-async-mcp` (transports InProcess/Stdio/HTTP). When a wire-format
+  `~/dev/p5-net-async-mcp` (transports InProcess/Stdio/HTTP). When a wire-format
   question comes up, cross-check against it — the two are meant to interoperate. It is a
   separate repo: never edit it from here; raise a ticket on its board instead.
 - **Every `lib/*.pm` carries its own `our $VERSION`** (currently `0.002`) and `dist.ini`
@@ -43,32 +43,26 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
   needs its own `$VERSION`, and one package per file — only the *first* `our $VERSION`
   in a file is rewritten at release.
 - **`README.md` is hand-maintained, not generated.** The bundle excludes it from the
-  tarball (`include_readme` is off), so it drifts from POD silently — it currently still
-  documents version 0.001. Changing POD does not update it.
+  tarball (`include_readme` is off), so it drifts from POD silently. Changing POD does not
+  update it; keep its version in lockstep with `$VERSION`.
 
 ## Known gaps — flag before silently "fixing"
 
 These are scope decisions for the maintainer, not obvious bugs. Name them, propose, and
 wait unless the ticket explicitly covers one:
 
-- **`handle_requests` is a blocking `while (my $line = <STDIN>)` loop.** Despite the
-  `IO::Async::Notifier` base, nothing here actually runs in the event loop — the `$loop`
-  it fetches is assigned and never used. Real async operation needs an
-  `IO::Async::Stream` on STDIN with a line-oriented `on_read`.
-- **The dispatch path calls `->get` on the `async sub`s** (`_handle_initialize`,
-  `_handle_tools_list`, `_handle_tools_call`). A `call_tool` implementation that waits on
-  I/O therefore blocks the whole server, and a `die` inside it propagates as an exception
-  out of `handle()` instead of becoming a JSON-RPC error response.
-- **Tool schema key is `input_schema` on the wire.** `register_tool` stores it as passed
-  and `tools/list` returns the registry hashes verbatim; MCP clients expect `inputSchema`.
-- **`tools/call` returns the tool's raw return value.** MCP expects a result of the shape
-  `{ content => [ { type => 'text', text => … } ] }`.
-- **`protocolVersion` is hardcoded to `2025-11-25`** in `initialize`; the version the
-  client offers in `params` is ignored, so there is no negotiation or mismatch error.
-- **`Server::configure` never calls `SUPER::configure`** and consumes only `name` — every
-  other parameter is silently dropped instead of reaching `IO::Async::Notifier` (which
-  would normally croak on an unrecognised one).
-- **`handle($request, $context)` ignores `$context`** — nothing supplies or consumes it.
+- **`StreamableHTTP->listen` blocks the event loop** (k17, k41). `to_app` is the async-friendly
+  PSGI entry point; `listen` runs `HTTP::Server::PSGI`'s own accept loop. A native
+  `IO::Async::Listener` bring-up is open as k41.
+- **The Stdio response write is a blocking `print`** (k18). Reading is stream-based; the
+  write side is not routed through the `IO::Async::Stream`.
+- **`handle()` is synchronous and calls `->get` on the `async sub`s** (`discover`,
+  `list_tools`, `call_tool`, ...). A `call_tool` that waits on I/O blocks the server, and
+  there is no server→client push channel (k24): no subscriptions delivery, logging or
+  progress notifications.
+- **No pagination** (k25): list methods return one complete page, no `cursor`/`nextCursor`.
+- **An empty `origin_allow` allows any Origin** (decided in k35: status quo, documented as a
+  DNS-rebinding risk in the POD).
 
 ## Verification
 

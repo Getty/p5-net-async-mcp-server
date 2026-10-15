@@ -311,9 +311,10 @@ sub _read_body {
   return $body;
 }
 
-# Header lookup, case-insensitive. PSGI already uppercases keys and folds
-# dashes to underscores, but a case-insensitive fallback makes tool authors
-# who flout that safe.
+# Header lookup by the spec's spelling: maps the name to the PSGI env key
+# (HTTP_ + uppercased, dashes to underscores). PSGI servers already normalise
+# header names that way, which is what makes this case-insensitive in
+# practice; there is no fallback scan of other env keys.
 sub _lookup_psgi_header {
   my ( $env, $name ) = @_;
   my $psgi_key = 'HTTP_' . uc $name;
@@ -419,7 +420,7 @@ sub _handle_request {
   # subscriptions/listen has no server->client push channel to deliver
   # *ListChanged in 0.002, so it falls through to handle() and gets the
   # normal -32601 — the same answer the Stdio transport gives. Real push
-  # delivery is deferred to karr #24.
+  # delivery is deferred to k24.
 
   # Default: synchronous JSON-RPC dispatch. handle() returns either a
   # response hashref or undef (the no-id case we already handled above
@@ -841,7 +842,8 @@ sub _method_not_allowed_response {
 # A successful request that the client wants as SSE arrives here. We emit
 # the JSON-RPC response as the single SSE event so the client gets its
 # answer in the stream form it asked for; the stream is closed afterwards.
-# Keepalives are pointlessly short-circuited because the response closes it.
+# There is no keepalive: the single event is written and the stream closed
+# in the same call.
 sub _handle_sse_stream {
   my ( $self, $env, $request, $response ) = @_;
   my $jsonrpc = encode_json($response);

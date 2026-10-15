@@ -265,6 +265,10 @@ legacy C<input_schema> alias), and an optional C<code> reference. The
 C<inputSchema> MUST be present — tools without a parameter schema are
 non-conformant under MCP 2026-07-28.
 
+The optional C<title>, C<annotations> and C<outputSchema> keys are passed
+through unchanged into the tool's wire shape in C<tools/list> (see
+L</list_tools>) when defined, and omitted from it otherwise.
+
 =cut
 
 async sub list_tools {
@@ -275,7 +279,8 @@ async sub list_tools {
 =method list_tools
 
 Returns a Future that resolves to an ArrayRef of tool definitions in wire
-shape (C<inputSchema>, not C<input_schema>).
+shape (C<name>, C<description>, C<inputSchema>, not C<input_schema>, and the
+optional C<title>, C<annotations>, C<outputSchema> when set).
 
 =cut
 
@@ -724,8 +729,9 @@ JSON-RPC request or notification hashref (C<jsonrpc>, C<method>, and
 optionally C<id> and C<params>); transports are responsible for decoding
 wire JSON before calling this and for encoding whatever it returns.
 
-Despite dispatching to the C<async sub> methods C<discover>, C<list_tools>
-and C<call_tool>, C<handle> itself is synchronous: it calls C<-E<gt>get>
+Despite dispatching to the C<async sub> methods C<discover>, C<list_tools>,
+C<call_tool>, C<list_resources>, C<read_resource>, C<list_prompts> and
+C<get_prompt>, C<handle> itself is synchronous: it calls C<-E<gt>get>
 on the C<Future> each of those returns and hands back a plain result,
 never a C<Future>.
 

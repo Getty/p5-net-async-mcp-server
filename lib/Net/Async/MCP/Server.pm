@@ -649,6 +649,9 @@ sub _handle_legacy_tools_call {
   my $name = $params->{name}      // '';
   my $args = $params->{arguments} // {};
 
+  return _jsonrpc_error( -32602, 'Invalid params: arguments must be an object', $id )
+    unless ref $args eq 'HASH';
+
   my $tool = $self->_find( tools => $name );
   unless ($tool) {
     return _jsonrpc_error(

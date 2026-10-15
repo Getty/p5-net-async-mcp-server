@@ -225,6 +225,36 @@ subtest 'legacy tools/call with non-hash params returns -32602' => sub {
     }
 };
 
+subtest 'legacy tools/call with non-hash arguments returns -32602' => sub {
+    my $server = _server( legacy_compat => 1 );
+    for my $bad ( [ 'array', [] ], [ 'string', 'oops' ], [ 'number', 42 ] ) {
+        my ( $label, $arguments ) = @$bad;
+        my $res;
+        ok(
+            lives { $res = $server->handle(
+                {
+                    jsonrpc => '2.0', id => 10, method => 'tools/call',
+                    params  => { name => 'inspect', arguments => $arguments },
+                },
+                { transport => 'stdio' },
+            ) },
+            'handle() does not die for '.$label.' arguments',
+        ) or next;
+        is( $res->{error}{code}, -32602, $label.' arguments: Invalid params' );
+        like( $res->{error}{message}, qr/arguments must be an object/, $label.' arguments: message' );
+        is( $res->{id}, 10, $label.' arguments: id preserved' );
+    }
+
+    my $res = $server->handle(
+        {
+            jsonrpc => '2.0', id => 11, method => 'tools/call',
+            params  => { name => 'inspect' },
+        },
+        { transport => 'stdio' },
+    );
+    ok( !$res->{error}, 'missing arguments still accepted' );
+};
+
 subtest 'context without transport does not warn' => sub {
     my $server = _server( legacy_compat => 1 );
     my @warn;

@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - legacy_compat tools/call: params.arguments that is defined but not an
+    object now returns -32602 'Invalid params: arguments must be an object'
+    with the request id instead of being passed to the tool; missing
+    arguments still default to {}.
+
   - tools/call: a tool result carrying its own resultType (e.g. MRTR
     input_required) now has isError normalized to a JSON boolean, like the
     rich-content branch; the tool's own hash is no longer mutated.

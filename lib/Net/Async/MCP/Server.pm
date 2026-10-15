@@ -536,7 +536,7 @@ sub _is_legacy_stdio_request {
   my ( $self, $request, $context ) = @_;
 
   return unless $self->legacy_compat;
-  return unless ref $context eq 'HASH' && $context->{transport} eq 'stdio';
+  return unless ref $context eq 'HASH' && ( $context->{transport} // '' ) eq 'stdio';
   return unless $request->{method} =~ /\A(?:initialize|ping|notifications\/initialized|tools\/list|tools\/call)\z/;
   return unless !defined $self->_request_protocol_version($request);
 
@@ -587,8 +587,12 @@ sub _handle_legacy_request {
 
   return $self->_legacy_jsonrpc_response( {}, $id ) if $method eq 'ping';
   return $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
-  return $self->_handle_legacy_tools_call( $request->{params} // {}, $id )
-    if $method eq 'tools/call';
+  if ( $method eq 'tools/call' ) {
+    my $params = $request->{params} // {};
+    return _jsonrpc_error( -32602, 'Invalid params: params must be an object', $id )
+      unless ref $params eq 'HASH';
+    return $self->_handle_legacy_tools_call( $params, $id );
+  }
 
   return _jsonrpc_error( -32601, "Method '$method' not found", $id );
 }

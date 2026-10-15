@@ -208,4 +208,32 @@ subtest 'legacy_compat accepts 2025-11-25 on stdio without changing 2026' => sub
     is($new_call->{result}{content}[0]{text}, 'new protocol', '2026 tools/call remains available');
 };
 
+subtest 'legacy tools/call with non-hash params returns -32602' => sub {
+    my $server = _server( legacy_compat => 1 );
+    for my $bad ( [ 'array', [] ], [ 'string', 'oops' ], [ 'number', 42 ] ) {
+        my ( $label, $params ) = @$bad;
+        my $res;
+        ok(
+            lives { $res = $server->handle(
+                { jsonrpc => '2.0', id => 9, method => 'tools/call', params => $params },
+                { transport => 'stdio' },
+            ) },
+            'handle() does not die for '.$label.' params',
+        ) or next;
+        is( $res->{error}{code}, -32602, $label.' params: Invalid params' );
+        is( $res->{id}, 9, $label.' params: id preserved' );
+    }
+};
+
+subtest 'context without transport does not warn' => sub {
+    my $server = _server( legacy_compat => 1 );
+    my @warn;
+    local $SIG{__WARN__} = sub { push @warn, @_ };
+    $server->handle(
+        { jsonrpc => '2.0', id => 1, method => 'tools/list' },
+        {},
+    );
+    is( \@warn, [], 'no uninitialized warning' );
+};
+
 done_testing;

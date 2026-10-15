@@ -924,14 +924,11 @@ subtest 'Mcp-Param integer against non-numeric header returns 400 -32020' => sub
     is($body->{error}{code}, -32020, 'JSON-RPC error -32020');
 };
 
-subtest 'Mcp-Param numeric-looking string body: deliberate value-based judgment' => sub {
-    # Deliberate judgment (see _header_value_matches): the comparison is
-    # value-based and cannot distinguish a JSON string "42" from a JSON number
-    # 42 without the parameter's declared schema type. A string body whose
-    # value merely looks numeric therefore takes the numeric path too, so a
-    # "42.0" header is accepted against a "42" string argument. The ideal
-    # spec-strict answer would be 400 (string comparison); reaching it would
-    # require schema-type-aware validation, which this check does not do.
+subtest 'Mcp-Param numeric-looking string body: declared string compares as string' => sub {
+    # The echo tool declares msg as type string, so the schema-aware check
+    # (k39) compares "42" against the header as a string: "42.0" is a
+    # mismatch. Integer-declared params keep numeric leniency (see the typed
+    # tool tests).
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
@@ -956,7 +953,7 @@ subtest 'Mcp-Param numeric-looking string body: deliberate value-based judgment'
     );
     my $res = $test->request($req);
 
-    is($res->code, 200, '200 OK: numeric-looking string compared numerically (value-based)');
+    is($res->code, 400, '400: declared string "42" does not match header 42.0');
 };
 
 subtest 'missing clientCapabilities in body _meta returns 400 -32602' => sub {
@@ -1074,5 +1071,133 @@ subtest 'resources/read internal error (-32603) stays 200' => sub {
     my $body = _decode_ok($res->content);
     is($body->{error}{code}, -32603, 'JSON-RPC error -32603 Internal error');
 };
+
+# --- k39: x-mcp-header enforced from the registered inputSchema -----------
+
+sub _schema_server {
+    my $server = Net::Async::MCP::Server->new(name => 'schema-test');
+    my $code = sub { return { ok => 1 } };
+    $server->register_tool(
+        name => 'nested', description => 'n', code => $code,
+        inputSchema => {
+            type       => 'object',
+            properties => {
+                a => {
+                    type       => 'object',
+                    properties => {
+                        b => { type => 'string', 'x-mcp-header' => 'Deep' },
+                    },
+                },
+            },
+        },
+    );
+    $server->register_tool(
+        name => 'hidden', description => 'h', code => $code,
+        inputSchema => {
+            type       => 'object',
+            properties => {
+                list => {
+                    type  => 'array',
+                    items => { type => 'object', properties => {
+                        x => { type => 'string', 'x-mcp-header' => 'InItems' },
+                    } },
+                },
+                alt => {
+                    oneOf => [ { type => 'object', properties => {
+                        y => { type => 'string', 'x-mcp-header' => 'InOneOf' },
+                    } } ],
+                },
+            },
+        },
+    );
+    $server->register_tool(
+        name => 'str', description => 's', code => $code,
+        inputSchema => {
+            type       => 'object',
+            properties => {
+                code => { type => 'string', 'x-mcp-header' => 'Code' },
+                num  => { type => 'integer', 'x-mcp-header' => 'Num' },
+            },
+        },
+    );
+    return $server;
+}
+
+sub _call {
+    my ( $server, $tool, $args, %headers ) = @_;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new( server => $server );
+    my $test = Plack::Test->create( $t->to_app );
+    my $res = $test->request( POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => $tool,
+        %headers,
+        'Content' => encode_json(
+            _make_call_envelope( id => 9, name => $tool, arguments => $args ),
+        ),
+    ) );
+    return ( $res, scalar decode_json( $res->content ) );
+}
+
+subtest 'k39: annotated value in body but header missing is rejected' => sub {
+    my ( $res, $body ) = _call( _make_server, 'echo', { msg => 'hello' } );
+    is( $res->code, 400, '400' );
+    is( $body->{error}{code}, -32020, '-32020' );
+    like( $body->{error}{message}, qr/Mcp-Param-Msg header is required/, 'message' );
+};
+
+subtest 'k39: annotated value with matching header passes' => sub {
+    my ( $res ) = _call( _make_server, 'echo', { msg => 'hello' }, 'Mcp-Param-Msg' => 'hello' );
+    is( $res->code, 200, '200' );
+};
+
+subtest 'k39: null value or absent argument needs no header' => sub {
+    my ( $res ) = _call( _make_server, 'echo', { msg => undef } );
+    is( $res->code, 200, 'null value: 200' );
+    ( $res ) = _call( _make_server, 'echo', {} );
+    is( $res->code, 200, 'absent argument: 200' );
+};
+
+subtest 'k39: nested properties annotation expects its header' => sub {
+    my $s = _schema_server;
+    my ( $res, $body ) = _call( $s, 'nested', { a => { b => 'x' } } );
+    is( $res->code, 400, '400 without header' );
+    like( $body->{error}{message}, qr/Mcp-Param-Deep header is required/, 'message' );
+    ( $res ) = _call( $s, 'nested', { a => { b => 'x' } }, 'Mcp-Param-Deep' => 'x' );
+    is( $res->code, 200, '200 with header' );
+};
+
+subtest 'k39: annotations under items / oneOf are ignored' => sub {
+    my ( $res ) = _call( _schema_server, 'hidden', {
+        list => [ { x => 'v' } ],
+        alt  => { y => 'v' },
+    } );
+    is( $res->code, 200, '200 without any header' );
+};
+
+subtest 'k39: declared string compares as string, integer stays numeric' => sub {
+    my $s = _schema_server;
+    my ( $res, $body ) = _call( $s, 'str', { code => '42' }, 'Mcp-Param-Code' => '42.0' );
+    is( $res->code, 400, 'string "42" vs header 42.0 mismatches' );
+    is( $body->{error}{code}, -32020, '-32020' );
+    ( $res ) = _call( $s, 'str', { num => 42 }, 'Mcp-Param-Num' => '42.0' );
+    is( $res->code, 200, 'integer 42 vs 42.0 still matches' );
+};
+
+subtest 'k39: unknown tool is not schema-checked' => sub {
+    my ( $res, $body ) = _call( _make_server, 'nope', { msg => 'x' } );
+    is( $body->{error}{code}, -32602, 'handle() -32602' );
+    unlike( $body->{error}{message}, qr/header is required/, 'no header complaint' );
+};
+
+subtest 'k39: find_tool accessor' => sub {
+    my $s = _make_server;
+    is( $s->find_tool('echo')->{name}, 'echo', 'found' );
+    ok( !$s->find_tool('nope'), 'unknown returns false' );
+};
+
 
 done_testing;

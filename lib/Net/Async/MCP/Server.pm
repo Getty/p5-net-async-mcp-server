@@ -225,6 +225,23 @@ Returns ArrayRef of registered tool definitions (internal storage shape).
 
 =cut
 
+sub find_tool {
+  my ( $self, $name ) = @_;
+  return unless defined $name;
+  return $self->_find( tools => $name );
+}
+
+=method find_tool
+
+    my $tool = $server->find_tool('echo');
+
+Returns the registered tool definition hashref (internal storage shape,
+C<inputSchema> normalised) for C<$name>, or an empty list when no such tool
+is registered. Transports use this to consult a tool's schema; the returned
+hash is the registry's own, so treat it as read-only.
+
+=cut
+
 sub register_tool {
   my ( $self, %tool ) = @_;
   croak q{register_tool requires 'name'} unless defined $tool{name};

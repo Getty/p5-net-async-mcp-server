@@ -87,6 +87,19 @@ matching C<arguments> value.
 
 =back
 
+The server looks the called tool up in its registry
+(L<Net::Async::MCP::Server/find_tool>) and enforces the annotations: when an
+annotated property holds a non-null value in C<arguments>, the matching
+C<Mcp-Param-{Name}> header MUST be present, or the request is rejected with
+C<-32020>. Annotations are found only along chains of C<properties> keys
+(nested objects included); a property reached through C<items>,
+C<oneOf>/C<anyOf>/C<allOf>/C<not>, C<if>/C<then>/C<else> or C<$ref> is not
+statically addressable and is ignored. The header value is compared by the
+property's declared type: a C<string> compares as a string, an C<integer> or
+C<number> numerically ("42" equals "42.0"), a C<boolean> as C<true>/C<false>.
+A call to an unknown tool is not schema-checked and gets the usual
+C<-32602> from C<handle()>.
+
 Any divergence between header value and body value is rejected with HTTP 400
 and JSON-RPC error C<-32020 HeaderMismatch>.
 
@@ -547,12 +560,34 @@ sub _validate_headers {
   }
 
   # Mcp-Param-{Name}: only meaningful for tools/call. The spec names these
-  # via x-mcp-header annotations in inputSchema; we don't track the schema
-  # here. Instead, every Mcp-Param-* header present on the request must
-  # match a value at the same name in params.arguments.
+  # via x-mcp-header annotations in the tool's inputSchema, which the
+  # server's registry holds. Two rules:
+  #   1. an annotated property that carries a non-null value in
+  #      params.arguments MUST have its Mcp-Param-{Name} header;
+  #   2. every Mcp-Param-* header present must match the argument it names
+  #      (the annotated property, else an argument of that very name).
   if ( $body_method eq 'tools/call' ) {
     my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
     my $arguments = ref $params->{arguments} eq 'HASH' ? $params->{arguments} : {};
+
+    # Unknown tool: no schema check; handle() answers -32602 as before.
+    my $tool = ( defined $params->{name} && !ref $params->{name} )
+      ? $self->server->find_tool( $params->{name} )
+      : undef;
+    my @annotated = $tool ? @{ $self->_header_params( $tool->{inputSchema} ) } : ();
+    my %by_header = map { lc $_->{name} => $_ } reverse @annotated;
+
+    for my $param (@annotated) {
+      my $value = _arg_value( $arguments, $param->{path} );
+      next unless defined $value;
+      my $header = _lookup_psgi_header( $env, $PARAM_HEADER_PREFIX . $param->{name} );
+      unless ( defined $header ) {
+        return $self->_header_mismatch(
+          "$PARAM_HEADER_PREFIX$param->{name} header is required",
+          $request->{id},
+        );
+      }
+    }
 
     # HTTP field names are case-insensitive (RFC 9110) and tool authors
     # are free to annotate a JSON property `region` with x-mcp-header
@@ -565,24 +600,33 @@ sub _validate_headers {
       $arg_name =~ tr/_/-/;
       my $header_value = $env->{$key};
 
-      my $body_key = $lc_args{ lc $arg_name };
-      unless ($body_key) {
-        return $self->_header_mismatch(
-          "$PARAM_HEADER_PREFIX$arg_name header set but body "
-            . "has no arguments.$arg_name",
-          $request->{id},
-        );
+      my ( $body_value, $body_label, $type );
+      if ( my $param = $by_header{ lc $arg_name } ) {
+        $body_value = _arg_value( $arguments, $param->{path} );
+        $body_label = join '.', @{ $param->{path} };
+        $type       = $param->{type};
+      }
+      else {
+        my $body_key = $lc_args{ lc $arg_name };
+        unless ($body_key) {
+          return $self->_header_mismatch(
+            "$PARAM_HEADER_PREFIX$arg_name header set but body "
+              . "has no arguments.$arg_name",
+            $request->{id},
+          );
+        }
+        $body_value = $arguments->{$body_key};
+        $body_label = $body_key;
       }
 
-      my $body_value = $arguments->{$body_key};
-      my $decoded    = $self->_decode_header($header_value);
+      my $decoded = $self->_decode_header($header_value);
       unless (
         defined $decoded
-        && $self->_header_value_matches( $decoded, $body_value )
+        && $self->_header_value_matches( $decoded, $body_value, $type )
       ) {
         return $self->_header_mismatch(
           "$PARAM_HEADER_PREFIX$arg_name header value does not "
-            . "match body arguments.$body_key",
+            . "match body arguments.$body_label",
           $request->{id},
         );
       }
@@ -637,15 +681,21 @@ sub _decode_header {
 #     ("42" and "42.0" agree), with a non-numeric header rejected up front;
 #   - everything else (plain strings, an undef / JSON-null body) falls back
 #     to `eq`.
-# A JSON string whose value merely looks numeric (e.g. "42") is
-# indistinguishable from a JSON number at the Perl level here, so it takes the
-# numeric path too; tightening that would need the declared schema type,
-# which this value-only check deliberately does not consult.
+# Without a declared type, a JSON string that merely looks numeric (e.g. "42")
+# is indistinguishable from a JSON number at the Perl level, so it takes the
+# numeric path; with the schema's declared type 'string' it compares as a
+# string, while a declared integer keeps the numeric leniency.
 sub _header_value_matches {
-  my ( $self, $header_decoded, $body_value ) = @_;
+  my ( $self, $header_decoded, $body_value, $type ) = @_;
 
   if ( JSON::MaybeXS::is_bool($body_value) ) {
     return $header_decoded eq ( $body_value ? 'true' : 'false' );
+  }
+
+  # A declared string is a string, whatever it looks like: "42" vs "42.0"
+  # differ. Only the schema's type can tell, so it is passed in when known.
+  if ( defined $type && $type eq 'string' && !ref $body_value ) {
+    return "$header_decoded" eq "$body_value";
   }
 
   if ( !ref $body_value && looks_like_number($body_value) ) {
@@ -654,6 +704,45 @@ sub _header_value_matches {
   }
 
   return "$header_decoded" eq "$body_value";
+}
+
+# The properties of an inputSchema annotated with x-mcp-header, reachable
+# from the root through a chain of "properties" keys only (never items,
+# oneOf/anyOf/allOf/not, if/then/else or $ref). Same walk as the client's
+# _header_params. Returns [ { name, path => [...], type } ].
+sub _header_params {
+  my ( $self, $schema, $path ) = @_;
+  $path //= [];
+
+  return [] unless ref $schema eq 'HASH' && ref $schema->{properties} eq 'HASH';
+
+  my @params;
+  for my $key ( sort keys %{ $schema->{properties} } ) {
+    my $property = $schema->{properties}{$key};
+    next unless ref $property eq 'HASH';
+
+    my @next = ( @$path, $key );
+    push @params, {
+      name => $property->{'x-mcp-header'},
+      path => \@next,
+      type => $property->{type},
+    } if defined $property->{'x-mcp-header'} && !ref $property->{'x-mcp-header'};
+    push @params, @{ $self->_header_params( $property, \@next ) };
+  }
+
+  return \@params;
+}
+
+# The argument value at a property path, or undef when absent or null.
+sub _arg_value {
+  my ( $arguments, $path ) = @_;
+
+  my $value = $arguments;
+  for my $key (@$path) {
+    return undef unless ref $value eq 'HASH';
+    $value = $value->{$key};
+  }
+  return $value;
 }
 
 sub _header_mismatch {

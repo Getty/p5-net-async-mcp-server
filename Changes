@@ -2,6 +2,14 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - StreamableHTTP enforces x-mcp-header from the registered inputSchema: an
+    annotated argument with a non-null value but no Mcp-Param-{Name} header
+    is rejected with 400/-32020. Only chains of "properties" keys are
+    walked (nested allowed); items/oneOf/anyOf/allOf/not/if/$ref are ignored.
+    The value comparison uses the declared type, so a string-typed param
+    compares as a string ("42" no longer matches "42.0"). New public
+    Net::Async::MCP::Server->find_tool($name).
+
   - legacy_compat tools/call with non-object params returns -32602 Invalid
     params instead of dying out of handle(); a context without a transport
     key no longer warns.

@@ -143,6 +143,15 @@ layer; callers do not have to add it themselves.
   `io.modelcontextprotocol/protocolVersion` is not in this server's
   `supportedVersions`; the error `data` lists the supported ones.
 
+Over the Streamable HTTP transport the error also sets the HTTP status:
+`-32601` → `404 Not Found`, and the `-32020`/`-32021`/`-32022`
+protocol-parity codes → `400 Bad Request`. A malformed request the transport
+rejects before dispatch (a missing required `_meta` field, such as
+`io.modelcontextprotocol/clientCapabilities`) is `400 -32602`. Every error
+`handle()` returns for a request that reached a real method — an unknown
+tool/resource/prompt (`-32602`), an internal failure (`-32603`) — stays
+`200 OK` with the JSON-RPC error in the body.
+
 ## Architecture
 
 The server is built on

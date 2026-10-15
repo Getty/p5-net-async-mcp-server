@@ -9,6 +9,7 @@ use parent 'IO::Async::Notifier';
 use JSON::MaybeXS qw( encode_json decode_json );
 use MIME::Base64 qw( decode_base64 );
 use Encode      qw( decode FB_DEFAULT );
+use Scalar::Util qw( looks_like_number );
 use HTTP::Server::PSGI;
 
 our $VERSION = '0.002';
@@ -435,7 +436,14 @@ sub _handle_request {
     return $self->_handle_sse_stream($env, $request, $response);
   }
 
-  return $self->_json_response($response);
+  # A spec-mandated JSON-RPC error takes its matching HTTP status (404 for
+  # method-not-found, 400 for a protocol/version parity error); everything
+  # else stays 200 with the payload in the body. Error responses never
+  # reach the SSE branch above - the downgrade already forced $sse off.
+  return $self->_json_response(
+    $response,
+    $self->_http_status_for_response($response),
+  );
 }
 
 # --- Header validation per spec section "Server Validation" -------------
@@ -465,6 +473,23 @@ sub _validate_headers {
     return $self->_header_mismatch(
       "$PROTOCOL_HEADER header '$protocol_header' does not match "
         . "body '$body_version'",
+      $request->{id},
+    );
+  }
+
+  # io.modelcontextprotocol/clientCapabilities: the spec requires it to be
+  # present in params._meta on every request; its value is not inspected,
+  # so a JSON null satisfies the check. This presence test lives here in
+  # the HTTP transport - not in the shared handle() - so a missing required
+  # field is rejected with the spec's 400 Bad Request, while the -32602
+  # handle() itself can still return (an unknown tool/resource/prompt name)
+  # remains an application-level error on HTTP 200.
+  unless (
+    $self->_meta_has( $request, 'io.modelcontextprotocol/clientCapabilities' )
+  ) {
+    return $self->_json_rpc_error_response(
+      -32602,
+      'Invalid params: missing io.modelcontextprotocol/clientCapabilities',
       $request->{id},
     );
   }
@@ -553,7 +578,7 @@ sub _validate_headers {
       my $decoded    = $self->_decode_header($header_value);
       unless (
         defined $decoded
-        && ( "$decoded" eq "$body_value" )
+        && $self->_header_value_matches( $decoded, $body_value )
       ) {
         return $self->_header_mismatch(
           "$PARAM_HEADER_PREFIX$arg_name header value does not "
@@ -574,6 +599,16 @@ sub _meta_field {
   return $meta->{$name};
 }
 
+# Presence-only companion to _meta_field: a required _meta key whose value is
+# not otherwise inspected (a JSON null is a legitimate value) is checked with
+# exists, not truthiness.
+sub _meta_has {
+  my ( $self, $request, $name ) = @_;
+  my $params = ref $request->{params} eq 'HASH' ? $request->{params} : {};
+  my $meta   = ref $params->{_meta} eq 'HASH' ? $params->{_meta} : {};
+  return exists $meta->{$name};
+}
+
 # Decodes a Mcp-Name / Mcp-Param-* header. A value wrapped in the
 # =?base64?...?= sentinel is decoded from Base64 of UTF-8; everything else
 # is returned as-is. A value that looks like the sentinel but doesn't
@@ -591,6 +626,34 @@ sub _decode_header {
   }
 
   return $value;
+}
+
+# Compares a decoded Mcp-Param-{Name} header against the body argument it
+# mirrors, honouring the wire encoding the spec (and the sibling client's
+# _header_value) uses. A raw `eq` mishandled the non-string JSON types:
+#   - a JSON boolean stringifies to "1"/"" in Perl but is carried on the wire
+#     as lowercase 'true'/'false', so it is compared against those words;
+#   - a JSON number is carried as its decimal string and compared *numerically*
+#     ("42" and "42.0" agree), with a non-numeric header rejected up front;
+#   - everything else (plain strings, an undef / JSON-null body) falls back
+#     to `eq`.
+# A JSON string whose value merely looks numeric (e.g. "42") is
+# indistinguishable from a JSON number at the Perl level here, so it takes the
+# numeric path too; tightening that would need the declared schema type,
+# which this value-only check deliberately does not consult.
+sub _header_value_matches {
+  my ( $self, $header_decoded, $body_value ) = @_;
+
+  if ( JSON::MaybeXS::is_bool($body_value) ) {
+    return $header_decoded eq ( $body_value ? 'true' : 'false' );
+  }
+
+  if ( !ref $body_value && looks_like_number($body_value) ) {
+    return unless looks_like_number($header_decoded);
+    return $header_decoded == $body_value;
+  }
+
+  return "$header_decoded" eq "$body_value";
 }
 
 sub _header_mismatch {
@@ -620,16 +683,35 @@ sub _json_rpc_error_response {
 }
 
 sub _json_response {
-  my ( $self, $response ) = @_;
+  my ( $self, $response, $status ) = @_;
+  $status //= 200;
   my $body = encode_json($response);
   return [
-    200,
+    $status,
     [
       'Content-Type'   => 'application/json',
       'Content-Length' => length($body),
     ],
     [$body],
   ];
+}
+
+# Maps a JSON-RPC error response from handle() to the HTTP status the
+# 2026-07-28 spec mandates. Only two error classes carry a non-200 status:
+#   -32601 (method not found)                 -> 404
+#   -32020/-32021/-32022 (parity/version)     -> 400
+# Everything else - a -32602 for an unknown tool/resource/prompt, a -32603
+# internal error - stays 200 with the JSON-RPC error in the body, since the
+# request reached a real method and failed at the application level.
+sub _http_status_for_response {
+  my ( $self, $response ) = @_;
+  return 200
+    unless ref $response eq 'HASH' && ref $response->{error} eq 'HASH';
+  my $code = $response->{error}{code};
+  return 200 unless defined $code;
+  return 404 if $code == -32601;
+  return 400 if $code == -32020 || $code == -32021 || $code == -32022;
+  return 200;
 }
 
 sub _accepted_response {

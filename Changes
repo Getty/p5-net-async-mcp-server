@@ -90,6 +90,20 @@ Revision history for Net-Async-MCP-Server
     as application/json or text/event-stream. Notifications return 202
     Accepted; header/body divergences return JSON-RPC -32020 HeaderMismatch.
     New runtime dep on Plack; new test file t/03-streamable-http.t.
+  - Streamable HTTP transport: Mcp-Param-{Name} parity compares a body value
+    by its JSON type instead of a raw string eq. A boolean is matched against
+    'true'/'false' and a number numerically (so a '42.0' header agrees with an
+    integer 42), fixing spurious -32020 HeaderMismatch rejections against the
+    Net::Async::MCP client's spec-conformant header encoding.
+  - Streamable HTTP transport: a spec-mandated JSON-RPC error now carries the
+    HTTP status the spec requires instead of a blanket 200 -- -32601 answers
+    404 Not Found and the -32020/-32021/-32022 protocol-parity codes answer
+    400 Bad Request. A request missing io.modelcontextprotocol/clientCapabilities
+    in its body _meta is rejected up front with 400 -32602 (a required field,
+    checked in the transport so the shared handle() and Stdio are unchanged).
+    Every other error handle() returns for a request that reached a real
+    method -- an unknown tool/resource/prompt (-32602), an internal failure
+    (-32603) -- still answers 200 with the JSON-RPC error in the body.
   - subscriptions/listen is not implemented in this release: it returns -32601
     in both transports, so Stdio and Streamable HTTP agree. Real server->client
     push delivery (subscription change notifications, logging, progress) is a

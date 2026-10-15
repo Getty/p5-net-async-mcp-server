@@ -52,6 +52,24 @@ sub _make_server {
             return { echoed => $args->{msg} };
         },
     );
+    # A tool whose x-mcp-header parameters are non-string JSON types, so the
+    # Mcp-Param-{Name} parity check has to compare a boolean / integer body
+    # value against its lowercase / decimal-string header form.
+    $server->register_tool(
+        name        => 'typed',
+        description => 'Echoes typed args',
+        inputSchema => {
+            type       => 'object',
+            properties => {
+                flag  => { type => 'boolean', 'x-mcp-header' => 'Flag' },
+                count => { type => 'integer', 'x-mcp-header' => 'Count' },
+            },
+        },
+        code => sub {
+            my ($args) = @_;
+            return { flag => $args->{flag}, count => $args->{count} };
+        },
+    );
     return $server;
 }
 
@@ -167,7 +185,11 @@ subtest 'Accept: text/event-stream on an erroring request downgrades to plain JS
     );
     my $res = $test->request($req);
 
-    is($res->code, 200, '200 OK (JSON-RPC error, not an HTTP error)');
+    # An unsupported protocol version is one of the three spec-mandated
+    # non-200 classes: the streamable-http spec maps it to 400 Bad Request
+    # (UnsupportedProtocolVersionError). The SSE downgrade is orthogonal —
+    # the body is still plain JSON, not an event stream.
+    is($res->code, 400, '400 Bad Request (unsupported protocol version)');
     is($res->content_type, 'application/json', 'plain JSON, not SSE, despite Accept');
 
     my $body = _decode_ok($res->content);
@@ -611,11 +633,13 @@ subtest 'POST to unknown path returns 404' => sub {
     is($res->code, 404, '404 Not Found');
 };
 
-subtest 'subscriptions/listen returns -32601 Method not found' => sub {
+subtest 'subscriptions/listen returns 404 -32601 Method not found' => sub {
     # subscriptions/listen was removed: there is no server->client push
     # channel to deliver it in this version, so it falls through handle()'s
     # normal dispatch and comes back as a plain JSON-RPC -32601, the same
-    # answer any other unknown method gets — not an SSE acknowledgement.
+    # answer any other unknown method gets — not an SSE acknowledgement. Per
+    # the streamable-http spec an unimplemented RPC method is 404 Not Found,
+    # which is how clients tell a modern server from a legacy one.
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
@@ -646,7 +670,7 @@ subtest 'subscriptions/listen returns -32601 Method not found' => sub {
     );
     my $res = $test->request($req);
 
-    is($res->code, 200, '200 OK (JSON-RPC error, not an HTTP error)');
+    is($res->code, 404, '404 Not Found (unimplemented RPC method)');
     is($res->content_type, 'application/json', 'plain JSON, not SSE');
 
     my $body = _decode_ok($res->content);
@@ -746,6 +770,309 @@ subtest 'x-mcp-header argument lookup is case-insensitive' => sub {
     my $res = $test->request($req);
 
     is($res->code, 200, '200 OK on case-insensitive lookup');
+};
+
+subtest 'Mcp-Param boolean true matches lowercase true header' => sub {
+    # Regression: a JSON true in the body stringifies to "1" in Perl, but the
+    # spec (and the sibling client) carries it as the word 'true'. A raw eq
+    # compared "1" against "true" and answered a bogus -32020.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'typed',
+        'Mcp-Param-Flag'       => 'true',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 20,
+                name      => 'typed',
+                arguments => { flag => JSON::MaybeXS::true() },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK: boolean true matches header true');
+};
+
+subtest 'Mcp-Param boolean false matches lowercase false header' => sub {
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'typed',
+        'Mcp-Param-Flag'       => 'false',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 21,
+                name      => 'typed',
+                arguments => { flag => JSON::MaybeXS::false() },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK: boolean false matches header false');
+};
+
+subtest 'Mcp-Param boolean true against numeric 1 header returns 400 -32020' => sub {
+    # The Perl truth value of a JSON boolean is not its wire form: '1' is not
+    # the spec-mandated 'true', so the parity check must reject it.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'typed',
+        'Mcp-Param-Flag'       => '1',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 22,
+                name      => 'typed',
+                arguments => { flag => JSON::MaybeXS::true() },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 400, '400 Bad Request: boolean true does not match header 1');
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32020, 'JSON-RPC error -32020');
+};
+
+subtest 'Mcp-Param integer compares numerically (42 matches 42.0 header)' => sub {
+    # Regression: a JSON integer 42 stringifies to "42"; a spec-conformant but
+    # non-canonical header "42.0" must still be accepted, because integers are
+    # compared numerically, not as strings.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'typed',
+        'Mcp-Param-Count'      => '42.0',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 23,
+                name      => 'typed',
+                arguments => { count => 42 },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK: 42.0 header matches integer 42 numerically');
+};
+
+subtest 'Mcp-Param integer against non-numeric header returns 400 -32020' => sub {
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'typed',
+        'Mcp-Param-Count'      => 'abc',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 24,
+                name      => 'typed',
+                arguments => { count => 42 },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 400, '400 Bad Request: non-numeric header cannot match integer 42');
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32020, 'JSON-RPC error -32020');
+};
+
+subtest 'Mcp-Param numeric-looking string body: deliberate value-based judgment' => sub {
+    # Deliberate judgment (see _header_value_matches): the comparison is
+    # value-based and cannot distinguish a JSON string "42" from a JSON number
+    # 42 without the parameter's declared schema type. A string body whose
+    # value merely looks numeric therefore takes the numeric path too, so a
+    # "42.0" header is accepted against a "42" string argument. The ideal
+    # spec-strict answer would be 400 (string comparison); reaching it would
+    # require schema-type-aware validation, which this check does not do.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'echo',
+        'Mcp-Param-Msg'        => '42.0',
+        'Content'              => encode_json(
+            _make_call_envelope(
+                id        => 25,
+                name      => 'echo',
+                arguments => { msg => '42' },
+            ),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK: numeric-looking string compared numerically (value-based)');
+};
+
+subtest 'missing clientCapabilities in body _meta returns 400 -32602' => sub {
+    # The 2026-07-28 spec requires io.modelcontextprotocol/clientCapabilities
+    # in params._meta on every request. A request missing a required field is
+    # malformed; the streamable-http transport MUST reject it with 400 and
+    # -32602 (Invalid params), rather than passing it to handle() and
+    # returning the body-only 200 that an unknown-tool -32602 gets.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $envelope = _build_envelope(
+        id     => 30,
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+            },
+        },
+    );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'server/discover',
+        'Content'              => encode_json($envelope),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 400, '400 Bad Request');
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32602, 'JSON-RPC error -32602 Invalid params');
+    like(
+        $body->{error}{message},
+        qr/clientCapabilities/,
+        'message names the missing field',
+    );
+};
+
+subtest 'tools/call on an unregistered tool stays 200 -32602' => sub {
+    # An unknown tool is a parameter error (-32602), not one of the three
+    # spec-mandated non-200 classes, so it stays HTTP 200 with the error in
+    # the body. This is the counterpart to the missing-clientCapabilities
+    # case above: both are -32602, but only a missing required _meta field is
+    # 400 — a -32602 that survives to handle() is genuinely an application
+    # error and keeps its 200.
+    my $server = _make_server;
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'tools/call',
+        'Mcp-Name'             => 'no_such_tool',
+        'Content'              => encode_json(
+            _make_call_envelope(id => 31, name => 'no_such_tool', arguments => {}),
+        ),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK (JSON-RPC error in body, not an HTTP error)');
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32602, 'JSON-RPC error -32602 unknown tool');
+};
+
+subtest 'resources/read internal error (-32603) stays 200' => sub {
+    # -32603 (Internal error) is not one of the spec's three non-200 classes,
+    # so a resource whose read dies comes back HTTP 200 with the error in the
+    # body — the generic-error case the status mapping must leave untouched.
+    my $server = _make_server;
+    $server->register_resource(
+        uri  => 'file:///boom',
+        name => 'boom',
+        # No code ref: read_resource dies with "has no implementation", which
+        # handle() maps to -32603.
+    );
+    my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+        server             => $server,
+    );
+    my $test = Plack::Test->create( $t->to_app );
+
+    my $envelope = _build_envelope(
+        id     => 32,
+        method => 'resources/read',
+        params => {
+            _meta => {
+                'io.modelcontextprotocol/protocolVersion'    => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => {},
+            },
+            uri => 'file:///boom',
+        },
+    );
+
+    my $req = POST(
+        '/mcp',
+        'Content-Type'         => 'application/json',
+        'Accept'               => 'application/json',
+        'MCP-Protocol-Version' => '2026-07-28',
+        'Mcp-Method'           => 'resources/read',
+        'Mcp-Name'             => 'file:///boom',
+        'Content'              => encode_json($envelope),
+    );
+    my $res = $test->request($req);
+
+    is($res->code, 200, '200 OK (internal error in body, not an HTTP error)');
+    my $body = _decode_ok($res->content);
+    is($body->{error}{code}, -32603, 'JSON-RPC error -32603 Internal error');
 };
 
 done_testing;

@@ -748,4 +748,34 @@ subtest 'tool annotations and outputSchema pass through into tools/list wire sha
     );
 };
 
+subtest 'tools/call isError is a JSON boolean on the wire' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    $server->register_tool(
+        name => 'boom', description => 'Always throws',
+        inputSchema => { type => 'object' },
+        code => sub { die "boom!\n" },
+    );
+    $server->register_tool(
+        name => 'rich_fail', description => 'Rich content, perl-truthy isError',
+        inputSchema => { type => 'object' },
+        code => sub { return { content => [ { type => 'text', text => 'x' } ], isError => 1 } },
+    );
+    $server->register_tool(
+        name => 'rich_ok', description => 'Rich content, perl-falsy isError',
+        inputSchema => { type => 'object' },
+        code => sub { return { content => [ { type => 'text', text => 'x' } ], isError => 0 } },
+    );
+
+    my %want = ( boom => 'true', rich_fail => 'true', rich_ok => 'false' );
+    for my $name ( sort keys %want ) {
+        my $response = $server->handle(_req(
+            id => 90, method => 'tools/call',
+            params => _params( name => $name, arguments => {} ),
+        ));
+        my $json = JSON::MaybeXS->new( canonical => 1 )->encode( $response->{result} );
+        like( $json, qr/"isError":$want{$name}(?![\w])/, $name.': isError encoded as '.$want{$name} );
+        unlike( $json, qr/"isError":[01](?![\w])/, $name.': isError not a number' );
+    }
+};
+
 done_testing;

@@ -890,7 +890,7 @@ sub _handle_tools_call {
       {
         resultType => 'complete',
         content    => [ { type => 'text', text => "$@" } ],
-        isError    => 1,
+        isError    => JSON::MaybeXS::true(),
       },
       $id,
     );
@@ -908,6 +908,9 @@ sub _handle_tools_call {
   if ( ref $result eq 'HASH'
     && ( ref $result->{content} eq 'ARRAY'
       || exists $result->{structuredContent} ) ) {
+    # isError is a schema boolean; tool authors may return Perl truthiness.
+    $result = { %$result, isError => $self->_legacy_boolean( $result->{isError} ) }
+      if exists $result->{isError};
     return $self->_jsonrpc_response( $result, $id );
   }
 

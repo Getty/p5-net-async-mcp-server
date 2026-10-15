@@ -2,6 +2,9 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - tools/call: isError is now a JSON boolean on the 2026-07-28 wire (was
+    1/0 as a number). The tool-error branch emits true; a rich-content result's
+    own isError is normalised to true/false.
   - Breaking protocol migration to MCP 2026-07-28 (stateless, _meta-based)
     remains the default. initialize, notifications/initialized and ping return
     -32601 Method not found unless legacy_compat is enabled.

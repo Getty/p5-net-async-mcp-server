@@ -1,0 +1,42 @@
+---
+claimed_at: 2026-10-15T16:15:06Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:15:06Z
+created: 2026-08-16T16:30:55Z
+id: 18
+priority: medium
+started: 2026-10-15T05:04:39Z
+status: done
+tags:
+- transport
+- async
+title: Stdio transport response write is a blocking print on the event loop
+updated: 2026-10-15T16:15:06Z
+---
+
+Split out of #15, whose autoflush half is done. This is #15 point 2, unchanged:
+
+lib/Net/Async/MCP/Server/Transport/Stdio.pm, _send_response:
+
+    print { $self->write_handle } encode_json($response) . "\n";
+
+The write is a blocking print, so a full stdout pipe blocks the event loop -
+the same class of problem #1 fixed on the read side. Fixing it properly means
+routing the write through the same IO::Async::Stream (write_handle => ...,
+$stream->write(...)), which then needs a flush-before-return at EOF so a
+response queued when stdin closes is not dropped.
+
+Note the ordering constraint the autoflush fix does not remove: with the
+write on the stream, "the response left the handle" becomes "the stream
+drained it", so t/04-stdio-transport.t subtest "responses are flushed as they
+are written" is the test that has to keep passing - it reads the far end of a
+real pipe mid-run and would catch a response that only leaves at EOF.
+
+2026-10-15 05:05 Nicht umgesetzt, Entscheidung vorbehalten (Public-API/Verhaltenswechsel). Befund: IO::Async::Stream braucht echten fd; In-Memory-Handles (fileno -1, von t/04-Subtests 1-3 und dem POD 'any filehandle will do' genutzt) verlieren Antworten SILENT. Außerdem setzt Stream O_NONBLOCK auf die Open-File-Description von STDOUT (leakt an Eltern/Peers; plain print kann EAGAIN werfen) und PerlIO-Buffer müsste vor syswrite geflusht werden. Optionen: A) Hybrid: Stream wenn fileno>=0, sonst blockierendes print; API bleibt, POD ergänzen (O_NONBLOCK-Hinweis), Flush bei EOF — Empfehlung, aber setzt O_NONBLOCK auf STDOUT = Verhaltenswechsel, von Getty zu bestätigen. B) write_handle muss echter OS-Handle sein (wie read_handle), t/04 auf Pipes umstellen — API-Einschränkung. C) blockierend lassen, nur POD präzisieren. Geplanter roter Test (A/B): Pipe mit nicht drainendem Reader, großer Response, Timer im selben Loop feuert pünktlich; nach EOF liegt die Antwort vollständig vor.
+
+2026-10-15 15:54 Entscheidung Getty: Option A (Hybrid) bestätigt.
+
+2026-10-15 16:02 Commit 6e61661, Option A (Hybrid) auf Entscheidung Getty. Stream-Write wenn fileno>=0, sonst print; PerlIO-Flush vor erstem Stream-Write; EOF wartet auf letzte Write-Future. Neuer Subtest in t/04 (nicht drainender Reader, Timer feuert, vollständige Antwort nach Drain): gegen altes lib/ rot (Alarm nach 21s), mit Änderung prove -lr t grün (115 Tests). Offen/Randbefund: O_NONBLOCK wird nach handle_requests nicht zurückgesetzt (Einzeiler, falls gewünscht); EOF-Wait ist unbegrenzt, wenn der Client nie liest (dokumentiert).
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

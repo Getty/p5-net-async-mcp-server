@@ -2,6 +2,12 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - Stdio transport: responses go through an IO::Async::Stream when
+    write_handle has an OS file descriptor, so a full stdout pipe no longer
+    blocks the event loop; the stream is flushed at stdin EOF before
+    handle_requests returns. In-memory handles keep the blocking print. The
+    stream puts the handle into O_NONBLOCK (documented).
+
   - Documentation: handle() POD lists all seven dispatched methods;
     register_tool/list_tools document title, annotations and outputSchema;
     StreamableHTTP and Stdio comments corrected; README documents

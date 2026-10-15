@@ -112,11 +112,34 @@ sub read_handle {
 
 The filehandle responses are written to, C<\*STDOUT> unless a C<write_handle>
 was passed to the constructor or to C<configure>. Unlike L</read_handle> this
-one is written to with a plain C<print>, so any filehandle will do.
+one has two write paths, picked once on entry to L</handle_requests>:
 
-L</handle_requests> turns C<autoflush> on for it. That is a change to a handle
-the caller may own and keep using, but a buffered response is a response the
-client never sees in time.
+=over
+
+=item *
+
+A handle with an OS file descriptor (C<fileno> E<gt>= 0: C<\*STDOUT>, a pipe,
+a socket) is written through an L<IO::Async::Stream>, so a full pipe never
+blocks the event loop; the data waits in the stream's buffer until the client
+drains it. Registering the handle with the loop puts it into non-blocking mode
+(C<O_NONBLOCK>), and that flag lives on the open file description, not on the
+Perl handle: it stays set after L</handle_requests> returns and is shared with
+every process holding the same descriptor, such as the parent shell's
+terminal. Anything else printing to that handle afterwards can see C<EAGAIN>.
+
+=item *
+
+A handle without one (an in-memory filehandle, C<fileno> of C<-1>) cannot be
+registered with a loop and keeps the plain, blocking C<print>.
+
+=back
+
+Either way responses leave in the order they were produced. Anything still
+sitting in the handle's own PerlIO buffer when L</handle_requests> starts is
+flushed first, so it cannot overtake or trail the stream's writes. On entry
+C<autoflush> is also turned on for it. That is a change to a handle the caller
+may own and keep using, but a buffered response is a response the client never
+sees in time.
 
 =cut
 
@@ -145,9 +168,13 @@ to it.
 The read handle is left open on EOF; the caller owns C<STDIN> and may still
 want it once the transport has shut down.
 
-C<autoflush> is switched on for L</write_handle> once, on entry: each response
-must reach the client as it is written, not when the buffer happens to fill.
-The write itself is still a blocking C<print>.
+Responses are written as they are produced, not when a buffer happens to fill
+(see L</write_handle> for the two write paths and the C<O_NONBLOCK> side
+effect). On EOF the stream's write buffer is flushed before this method
+returns, so a response queued when stdin closed is not lost; if the client is
+not draining its end of the pipe, that wait is a wait on a L<Future>, which
+leaves the rest of the loop running, but it does not end until the client
+reads. A flush that fails because the client went away is ignored.
 
 =cut
 
@@ -166,7 +193,19 @@ sub handle_requests {
     # had piled up or the process exited. Set here rather than in configure
     # because this is the point where the transport takes over a handle the
     # caller owns, and once per run rather than per response.
-    $self->write_handle->autoflush(1);
+    my $wh = $self->write_handle;
+    $wh->autoflush(1);
+    $wh->flush;    # nothing may still sit in the PerlIO buffer ahead of the stream
+
+    # An in-memory handle has no descriptor to register with the loop and
+    # stays on the blocking print.
+    my $fd = fileno($wh);
+    my $wstream;
+    if ( defined $fd and $fd >= 0 ) {
+        $wstream = IO::Async::Stream->new( write_handle => $wh );
+        $self->add_child($wstream);
+        $self->{_write_stream} = $wstream;
+    }
 
     my $eof_f = $loop->new_future;
 
@@ -198,6 +237,16 @@ sub handle_requests {
     # out of the loop either way.
     my $ok  = eval { $eof_f->get; 1 };
     my $err = $@;
+
+    if ($wstream) {
+        # A response queued when stdin closed must reach the client. The last
+        # write's future is ready once the stream has drained it; a failure
+        # means the client is gone and there is nobody left to tell.
+        my $last = delete $self->{_last_write_f};
+        eval { $last->get } if $last and !$last->is_ready;
+        delete $self->{_write_stream};
+        $self->remove_child($wstream);
+    }
 
     $self->remove_child($stream);
 
@@ -250,7 +299,13 @@ sub _handle_line {
 
 sub _send_response {
     my ( $self, $response ) = @_;
-    print { $self->write_handle } encode_json($response) . "\n";
+    my $line = encode_json($response) . "\n";
+    if ( my $wstream = $self->{_write_stream} ) {
+        $self->{_last_write_f} = $wstream->write($line);
+        return;
+    }
+    print { $self->write_handle } $line;
+    return;
 }
 
 1;

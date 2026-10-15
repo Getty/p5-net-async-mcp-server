@@ -253,7 +253,87 @@ subtest 'responses are flushed as they are written' => sub {
     close $resp_w;
 };
 
-subtest 'handle defaults' => sub {
+# A client that does not read must not freeze the loop. The response is far
+# larger than a pipe holds and nobody drains the pipe until a later timer, so a
+# blocking print would sit inside the read callback and no timer could ever
+# fire (the alarm turns that hang into a failure). With the write on the
+# stream the timer after the request still fires, and the response is
+# complete once the client does drain.
+subtest 'a non-draining client does not block the loop' => sub {
+    my $loop = IO::Async::Loop->new;
+
+    pipe( my $req_r, my $req_w ) or die "pipe: $!";
+    $req_w->autoflush(1);
+    pipe( my $resp_r, my $resp_w ) or die "pipe: $!";
+
+    my $text   = q(x) x 300_000;
+    my $server = _server();
+    $server->register_tool(
+        name        => q(big),
+        description => q(A response larger than a pipe holds),
+        inputSchema => { type => q(object) },
+        code        => sub { $text },
+    );
+    my $transport = Net::Async::MCP::Server::Transport::Stdio->new(
+        server       => $server,
+        read_handle  => $req_r,
+        write_handle => $resp_w,
+    );
+    $loop->add($transport);
+
+    my ( $ticks, $fired_while_pending, $draining, $seen ) = ( 0, 0, 0, '' );
+    my $timer;
+    $timer = IO::Async::Timer::Countdown->new(
+        delay     => 0.05,
+        on_expire => sub {
+            $ticks++;
+            if ( $ticks == 1 ) {
+                print {$req_w} _req( 5, 'tools/call', name => q(big) );
+            }
+            elsif ( $ticks == 2 ) {
+                $fired_while_pending = 1;    # reached only if the loop was not blocked
+                close $req_w;                # EOF with the response still queued
+            }
+            else {
+                $draining = 1;
+                $resp_r->blocking(0);
+                while ( defined sysread( $resp_r, my $buf, 65536 ) ) {
+                    last unless length $buf;
+                    $seen .= $buf;
+                }
+                return if $seen =~ /\n\z/;
+            }
+            $timer->start;
+        },
+    );
+    $loop->add($timer);
+    $timer->start;
+
+    local $SIG{ALRM} = sub { die "blocked\n" };
+    alarm 20;
+    my $ok = eval { $transport->handle_requests; 1 };
+    alarm 0;
+    ok( $ok, 'handle_requests returned' ) or diag $@;
+
+    ok( $fired_while_pending, 'timer fired while the response was undrained' );
+    ok( $draining, 'client drained before handle_requests returned' );
+
+    # After a failure the old blocking print left bytes in the PerlIO buffer;
+    # close would block flushing them into a pipe nobody reads.
+    $resp_w->blocking(0) unless $ok;
+    close $resp_w;
+    $resp_r->blocking(1);
+    {
+        local $/;
+        $seen .= <$resp_r> // '';
+    }
+    my $msgs = _decode_lines($seen);
+    is( scalar @$msgs, 1, 'one complete response line' );
+    is( $msgs->[0]{id}, 5, 'it is the answer to the request' );
+    is( $msgs->[0]{result}{content}[0]{text}, $text, 'with the whole tool result' );
+};
+
+subtest 'handle defaults'=> sub {
     my $transport = Net::Async::MCP::Server::Transport::Stdio->new( server => _server() );
     is( $transport->read_handle,  \*STDIN,  'read_handle defaults to STDIN' );
     is( $transport->write_handle, \*STDOUT, 'write_handle defaults to STDOUT' );

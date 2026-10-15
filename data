@@ -1,0 +1,46 @@
+---
+claimed_at: 2026-10-15T16:16:10Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:16:10Z
+created: 2026-10-06T19:46:24Z
+id: 44
+priority: low
+started: 2026-10-15T04:52:16Z
+status: done
+tags:
+- bug
+- stdio
+- legacy
+- review-2026-10-06
+title: 'legacy_compat: tools/call mit params, die kein Objekt sind, lässt handle()
+  sterben und beendet den Stdio-Server'
+updated: 2026-10-15T16:16:10Z
+---
+
+## Befund
+
+`_handle_legacy_request` reicht `$request->{params} // {}` ungeprüft an `_handle_legacy_tools_call` weiter (`lib/Net/Async/MCP/Server.pm:590`), das sofort `$params->{name}` liest (`Server.pm:608`). Für `initialize` wird der Typ geprüft (`Server.pm:568`), für `tools/call` nicht.
+
+    $s = Net::Async::MCP::Server->new(name => 'x', legacy_compat => 1);
+    $s->handle({ jsonrpc => '2.0', id => 7, method => 'tools/call', params => [] }, { transport => 'stdio' });
+    # Not a HASH reference at lib/Net/Async/MCP/Server.pm line 608.
+
+Im Stdio-Transport ist `handle()` nicht in ein eval gefasst (`Transport/Stdio.pm:240`), die Ausnahme läuft aus dem `on_read` durch die Loop und beendet `handle_requests` — eine einzige kaputte Zeile vom Client reißt den Server ab. Der 2026-Pfad ist nicht betroffen (`_validate_request_meta` fängt Nicht-Hash-params vorher mit -32602 ab).
+
+Nebenbei: `_is_legacy_stdio_request` (`Server.pm:539`) wirft `Use of uninitialized value in string eq`, wenn ein Kontext-Hash ohne `transport`-Schlüssel hereinkommt.
+
+## Fertig
+
+- Legacy-`tools/call` mit Nicht-Hash-`params` liefert `-32602 Invalid params` statt zu sterben.
+- `$context->{transport} // ''` in `_is_legacy_stdio_request`.
+- Regressionstest in `t/06-legacy-stdio-compat.t`.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-15 04:53 Commit 00d4334. Legacy tools/call mit Nicht-Hash-params -> -32602 (Id bleibt), $context->{transport} // ''. Tests in t/06 (2 Subtests) gegen altes lib/ rot, danach prove -lr t grün (7 Dateien/105 Tests). Randbefund: _handle_legacy_tools_call reicht nicht-hash 'arguments' ungeprüft an call_tool; Fehlertext 'params must be an object' von mir gewählt.
+
+2026-10-15 16:06 Nachtrag: Commit 4aa0245 - legacy tools/call mit Nicht-Hash-arguments -> -32602. Offen: 2026-Pfad _handle_tools_call prüft arguments nicht (Nicht-Hash kommt als isError-Tool-Fehler statt -32602 zurück); gleiche drei Zeilen, falls Parität gewünscht.
+
+2026-10-15 16:16 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

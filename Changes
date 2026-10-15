@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - register_tool/register_resource/register_prompt croak when the key
+    (tool/prompt name, resource uri) is already registered, instead of
+    appending a second entry that tools/list advertised but nothing could
+    call.
+
   - Stdio transport: responses go through an IO::Async::Stream when
     write_handle has an OS file descriptor, so a full stdout pipe no longer
     blocks the event loop; the stream is flushed at stdin EOF before

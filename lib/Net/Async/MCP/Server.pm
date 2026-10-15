@@ -100,6 +100,10 @@ my %REGISTRY = (
 
 sub _register {
   my ( $self, $kind, %def ) = @_;
+  my $key = $def{ $REGISTRY{$kind}{key} };
+  ( my $label = $kind ) =~ s/s\z//;
+  croak ucfirst( $label ).q{ '}.$key.q{' is already registered}
+    if $self->_find( $kind => $key );
   push @{ $self->{$kind} //= [] }, \%def;
   return;
 }
@@ -265,6 +269,9 @@ legacy C<input_schema> alias), and an optional C<code> reference. The
 C<inputSchema> MUST be present — tools without a parameter schema are
 non-conformant under MCP 2026-07-28.
 
+Croaks when a tool with the same C<name> is already registered; a registered
+tool is never silently replaced or duplicated.
+
 The optional C<title>, C<annotations> and C<outputSchema> keys are passed
 through unchanged into the tool's wire shape in C<tools/list> (see
 L</list_tools>) when defined, and omitted from it otherwise.
@@ -365,6 +372,8 @@ Registers a resource. Expects C<uri> and C<name>, an optional C<mimeType>,
 C<description> and C<title>, and a C<code> reference invoked with the resource
 URI when the resource is read.
 
+Croaks when a resource with the same C<uri> is already registered.
+
 =cut
 
 async sub list_resources {
@@ -448,6 +457,8 @@ C<arguments> ArrayRef, and a C<code> reference invoked with the request
 arguments when the prompt is fetched. An C<arguments> entry with a true
 C<required> must be present in C<prompts/get> or the request fails with
 C<-32602> before C<code> runs.
+
+Croaks when a prompt with the same C<name> is already registered.
 
 =cut
 

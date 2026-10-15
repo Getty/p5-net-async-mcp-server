@@ -92,6 +92,43 @@ subtest 'list_tools returns wire shape' => sub {
     is($tools->[1]{title}, 'Second (display)', 'title passes through when set');
 };
 
+subtest 'duplicate registration croaks' => sub {
+    my $server = Net::Async::MCP::Server->new;
+
+    $server->register_tool(
+        name => 't', description => 'first', inputSchema => { type => 'object' },
+    );
+    like(
+        dies { $server->register_tool(
+            name => 't', description => 'second', inputSchema => { type => 'object' },
+        ) },
+        qr/Tool 't' is already registered/,
+        'duplicate tool name croaks',
+    );
+    is([map { $_->{description} } @{ $server->tools }], ['first'],
+        'first tool registration kept, none appended');
+
+    $server->register_resource( uri => 'file:///a', name => 'a' );
+    like(
+        dies { $server->register_resource( uri => 'file:///a', name => 'other' ) },
+        qr{Resource 'file:///a' is already registered},
+        'duplicate resource uri croaks',
+    );
+    is(scalar @{ $server->resources }, 1, 'one resource kept');
+
+    $server->register_prompt( name => 'p' );
+    like(
+        dies { $server->register_prompt( name => 'p' ) },
+        qr/Prompt 'p' is already registered/,
+        'duplicate prompt name croaks',
+    );
+    is(scalar @{ $server->prompts }, 1, 'one prompt kept');
+
+    # Same key across different kinds is not a duplicate.
+    ok(lives { $server->register_prompt( name => 't' ) },
+        'prompt may share a name with a tool');
+};
+
 subtest 'discover' => sub {
     my $server = Net::Async::MCP::Server->new;
     my $result = $server->discover->get;

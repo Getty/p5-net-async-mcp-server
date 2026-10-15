@@ -782,4 +782,33 @@ subtest 'tools/call isError is a JSON boolean on the wire' => sub {
     }
 };
 
+subtest 'tools/call isError is a JSON boolean on a resultType passthrough' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    my $tool_hash = { resultType => 'input_required', content => [ { type => 'text', text => 'x' } ], isError => 1 };
+    $server->register_tool(
+        name => 'mrtr_fail', description => 'Own resultType, perl-truthy isError',
+        inputSchema => { type => 'object' },
+        code => sub { return $tool_hash },
+    );
+    $server->register_tool(
+        name => 'mrtr_ok', description => 'Own resultType, perl-falsy isError',
+        inputSchema => { type => 'object' },
+        code => sub { return { resultType => 'input_required', content => [], isError => 0 } },
+    );
+
+    my %want = ( mrtr_fail => 'true', mrtr_ok => 'false' );
+    for my $name ( sort keys %want ) {
+        my $response = $server->handle(_req(
+            id => 91, method => 'tools/call',
+            params => _params( name => $name, arguments => {} ),
+        ));
+        my $json = JSON::MaybeXS->new( canonical => 1 )->encode( $response->{result} );
+        like( $json, qr/"isError":$want{$name}(?![\w])/, $name.': isError encoded as '.$want{$name} );
+        unlike( $json, qr/"isError":[01](?![\w])/, $name.': isError not a number' );
+        like( $json, qr/"resultType":"input_required"/, $name.': own resultType kept' );
+    }
+    is( $tool_hash->{isError}, 1, 'tool-returned hash not mutated' );
+    ok( !exists $tool_hash->{_meta}, 'tool-returned hash got no _meta' );
+};
+
 done_testing;

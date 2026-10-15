@@ -2,6 +2,10 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - tools/call: a tool result carrying its own resultType (e.g. MRTR
+    input_required) now has isError normalized to a JSON boolean, like the
+    rich-content branch; the tool's own hash is no longer mutated.
+
   - register_tool/register_resource/register_prompt croak when the key
     (tool/prompt name, resource uri) is already registered, instead of
     appending a second entry that tools/list advertised but nothing could

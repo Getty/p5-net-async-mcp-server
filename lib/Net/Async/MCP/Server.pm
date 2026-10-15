@@ -940,8 +940,11 @@ sub _handle_tools_call {
   };
 
   # MRTR: a tool may return its own result hashref (e.g. resultType =>
-  # 'input_required'). Pass through unchanged.
+  # 'input_required'). Passed through; only isError is normalized, on a
+  # shallow copy so the tool's own hash is not mutated.
   if ( ref $result eq 'HASH' && defined $result->{resultType} ) {
+    $result = { %$result, isError => $self->_legacy_boolean( $result->{isError} ) }
+      if exists $result->{isError};
     return $self->_jsonrpc_response( $result, $id );
   }
 

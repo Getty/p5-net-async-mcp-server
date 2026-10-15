@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-09-01T05:01:04Z
+id: 24
+priority: medium
+status: backlog
+tags:
+- deferred
+- architecture
+title: 'Deferred: server->client push channel (subscriptions delivery, logging, progress)'
+updated: 2026-10-15T05:05:26Z
+---
+
+Shared blocker behind real subscriptions/listen delivery (*ListChanged), logging/setLevel + notifications/message, and progress tokens (_meta progressToken + notifications/progress). handle() currently resolves async subs synchronously via ->get and there is no notification-emission path. Also gated on the non-blocking transport work (#17 HTTP listen, #18 Stdio write). Design a notifier-level emit_notification fan-out to open streams before building any of these.
+
+2026-10-15 05:05 Nicht angefasst: Karte verlangt ausdrücklich erst Design (emit_notification-Fan-out), Public-API/Architektur vorbehalten, hängt an k18 (offen, Entscheidung) und k41. Empfehlung: erst k18 und k41 entscheiden; dann Design-Notiz: Server hält Registry offener Streams (Stdio-Stream + SSE-Responses), emit_notification($method,$params) fan-out; handle() muss vorher ohne ->get auskommen (Future zurückgeben statt blockieren), sonst blockiert der Push-Pfad.

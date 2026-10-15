@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-10-15T16:15:17Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:15:17Z
+created: 2026-09-01T19:51:14Z
+id: 34
+priority: low
+started: 2026-10-15T04:55:43Z
+status: done
+tags:
+- server
+- spec
+title: 'tools/call: structuredContent ohne content ergänzen; prompts/get: required-Argumente
+  prüfen'
+updated: 2026-10-15T16:15:17Z
+---
+
+## Befund a: structuredContent ohne content
+
+Ein Tool-Return `{ structuredContent => {...} }` wird verbatim durchgereicht → Result ohne `content`. CallToolResult verlangt `content`; Spec (server/tools, Structured Content): "For backwards compatibility, a tool that returns structured content SHOULD also return the serialized JSON in a TextContent block." Der Test 'structuredContent alone (no content key) passes through' in t/02 schreibt das Fehlverhalten fest.
+
+Anweisung: in `_handle_tools_call`, Rich-Content-Zweig: fehlt `content` bei vorhandenem `structuredContent`, `content => [ { type => 'text', text => encode_json($structuredContent) } ]` ergänzen. Test-Claim ändern und im Commit sagen.
+
+## Befund b: prompts/get ignoriert `required`
+
+`register_prompt` nimmt `arguments => [ { name, required } ]` entgegen, `_handle_prompts_get` prüft nichts. Spec (server/prompts, Error Handling): "Missing required arguments: -32602 (Invalid params)"; "Servers SHOULD validate prompt arguments before processing".
+
+Anweisung: vor `get_prompt` für jedes registrierte Argument mit wahrem `required` prüfen, dass `params.arguments.{name}` definiert ist; sonst `-32602 "Invalid params: missing required argument 'x'"`.
+
+## Optional c
+
+`resources/list` und `prompts/list` tragen keine `ttlMs`/`cacheScope`-Hinweise, `tools/list` schon. Wenn man dabei ist: gleiche Werte setzen, konsistent halten.
+
+Tests in t/02 bzw. t/05, Changes-Eintrag. Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+2026-10-15 05:03 Zwei Commits: ee7ed95 (a: structuredContent ohne content -> Textblock mit encode_json; t/02-Claim 'passes through' geändert) und 5720829 (b: prompts/get -32602 bei fehlendem required-Argument; explizites null zählt als fehlend). Beide gegen altes lib/ rot, prove -lr t grün (114 Tests). VON GETTY ZU BESTÄTIGEN: beide sind Verhaltenswechsel, auf Kartenanweisung umgesetzt. Teil c (ttlMs/cacheScope für resources/prompts list) bewusst NICHT umgesetzt (optional). Randbefunde: _handle_legacy_tools_call reicht nicht-hash 'arguments' ungeprüft durch; Warnung 'uninitialized $body_value' StreamableHTTP.pm ~698.
+
+2026-10-15 15:54 Von Getty bestätigt (beide Verhaltenswechsel a und b).
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

@@ -1200,4 +1200,44 @@ subtest 'k39: find_tool accessor' => sub {
 };
 
 
+subtest 'Mcp-Param header with null or missing body value is -32020 without warnings' => sub {
+    # Regression: an undef body value reached `eq` in _header_value_matches
+    # and warned "uninitialized value $body_value in string eq". The outcome
+    # (header present, body value null/missing => mismatch) is unchanged.
+    my @cases = (
+        [ 'JSON null, undeclared param' => 'echo',  'Msg',  { msg => undef } ],
+        [ 'missing, undeclared param'   => 'echo',  'Msg',  { other => 1 } ],
+        [ 'JSON null, x-mcp-header'     => 'typed', 'Flag', { flag => undef } ],
+        [ 'missing, x-mcp-header'       => 'typed', 'Flag', {} ],
+    );
+    my $id = 40;
+    for my $case (@cases) {
+        my ( $label, $tool, $hdr, $args ) = @$case;
+        my $server = _make_server;
+        my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
+            server => $server,
+        );
+        my $test = Plack::Test->create( $t->to_app );
+        my $req = POST(
+            '/mcp',
+            'Content-Type'         => 'application/json',
+            'Accept'               => 'application/json',
+            'MCP-Protocol-Version' => '2026-07-28',
+            'Mcp-Method'           => 'tools/call',
+            'Mcp-Name'             => $tool,
+            "Mcp-Param-$hdr"       => 'something',
+            'Content'              => encode_json(
+                _make_call_envelope(
+                    id => $id++, name => $tool, arguments => $args,
+                ),
+            ),
+        );
+        my $res;
+        my $warnings = warnings { $res = $test->request($req) };
+        is($res->code, 400, "$label: 400");
+        is(_decode_ok($res->content)->{error}{code}, -32020, "$label: -32020");
+        is($warnings, [], "$label: no warnings");
+    }
+};
+
 done_testing;

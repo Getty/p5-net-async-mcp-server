@@ -2,6 +2,10 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - StreamableHTTP: an Mcp-Param-* header whose body argument is null or
+    missing no longer emits an 'uninitialized value' warning; the request
+    is still answered 400 / -32020.
+
   - legacy_compat tools/call: params.arguments that is defined but not an
     object now returns -32602 'Invalid params: arguments must be an object'
     with the request id instead of being passed to the tool; missing

@@ -689,6 +689,10 @@ sub _decode_header {
 sub _header_value_matches {
   my ( $self, $header_decoded, $body_value, $type ) = @_;
 
+  # A null or missing body value compares as the empty string, as the
+  # final `eq` always has; stated explicitly so it does not warn.
+  $body_value = '' unless defined $body_value;
+
   if ( JSON::MaybeXS::is_bool($body_value) ) {
     return $header_decoded eq ( $body_value ? 'true' : 'false' );
   }

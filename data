@@ -1,0 +1,60 @@
+---
+claimed_at: 2026-10-15T16:15:38Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:15:38Z
+created: 2026-09-01T19:52:57Z
+depends_on:
+- 33
+id: 39
+priority: medium
+started: 2026-10-15T04:53:02Z
+status: done
+tags:
+- http
+- spec
+title: 'StreamableHTTP: x-mcp-header aus dem registrierten inputSchema erzwingen (fehlender
+  Header wird akzeptiert)'
+updated: 2026-10-15T16:15:38Z
+---
+
+## Befund (Probe)
+
+Ein vorhandener `Mcp-Param-*`-Header wird gegen den Body geprüft. Fehlt der Header, obwohl der annotierte Wert im Body steht, wird der Request akzeptiert (200). Der Kommentar in `_validate_headers` sagt "we don't track the schema here" — der Server hat das `inputSchema` aber in seiner Registry.
+
+## Spec (streamable-http, Server Behavior for Custom Headers)
+
+Tabelle: "Client omits header but value is in body → Non-conforming client → Server MUST reject the request". Und: "Header extraction is defined as reading the instance value at the exact property path of the annotated property (the chain of properties keys leading to it)."
+
+Statisch erreichbar heißt: nur Ketten aus `properties`-Schlüsseln; nicht durch `items`, `oneOf`/`anyOf`/`allOf`/`not`, `if`/`then`/`else` oder `$ref`.
+
+## Anweisung
+
+1. Öffentlicher Accessor `find_tool($name)` in Server.pm (das private `_find_tool` darf der Transport nicht anfassen); POD dazu.
+2. Bei `tools/call` in `_validate_headers`: Tool holen, `inputSchema` nach `x-mcp-header` laufen (nur `properties`-Ketten, verschachtelt erlaubt), Ergebnis: Liste (Header-Name, Pfad). Für jede Annotation mit vorhandenem, nicht-null Wert an dem Pfad in `params.arguments` muss der Header `Mcp-Param-{Name}` (case-insensitiv) vorhanden sein und matchen (Vergleich aus k33); sonst -32020 "Mcp-Param-{Name} header is required".
+3. Bestehende Regel bleibt: jeder vorhandene `Mcp-Param-*` muss zu einem Argument passen.
+4. Unbekanntes Tool: keine Schema-Prüfung; `handle()` liefert wie bisher -32602.
+5. Referenz für den Walk: `_header_params` in ~/dev/p5-net-async-mcp/lib/Net/Async/MCP.pm (Client-Seite). Lesen, um gleich zu entscheiden; nicht kopieren.
+6. Changes-Eintrag; POD-Abschnitt PROTOCOL im Transport anpassen.
+
+## Tests (t/03)
+
+- annotierter Wert im Body, Header fehlt → 400/-32020.
+- mit passendem Header → 200.
+- Wert null / Argument fehlt, kein Header → 200.
+- verschachtelte `properties` (a.b annotiert) → Header erwartet.
+- Annotation unter `items` oder `oneOf` → ignoriert.
+
+Hängt von k33 ab.
+
+Agent: mcp-server-worker, Tests mcp-server-test-writer.
+
+2026-09-09 09:14 Cross-ref from k33: _header_value_matches in StreamableHTTP.pm is value-only, so a JSON string that looks numeric (body 42 vs header 42.0) takes the numeric path and matches (200) - the one corner k33 could not make strict. When this ticket walks inputSchema and knows each annotated property's declared type, make the value comparison type-aware (mirror the client _header_value(type,value)) to make a declared-string param compare as string. Keep numeric leniency for declared integers.
+
+2026-10-15 04:55 Commit 76e5ebb. Öffentlicher find_tool; _header_params walkt nur properties-Ketten; fehlender Mcp-Param-Header bei vorhandenem, nicht-nullem Wert -> 400/-32020; typbewusster Vergleich. 8 neue Subtests in t/03, 4 davon gegen altes lib/ rot (übrige 4 sind Nicht-Regressions-Claims); prove -lr t grün (113 Tests). VON GETTY ZU BESTÄTIGEN: (1) deklarierter string-Parameter vergleicht als String, der k33-Test '42 vs 42.0' erwartet nun 400 statt 200 (von k33-Notiz vorgesehen); (2) vorhandene Header werden zuerst über den Annotationsnamen aufgelöst, danach alter Argumentnamen-Fallback (geht leicht über den Kartentext hinaus). Randbefund: vorbestehende Warnung 'uninitialized $body_value' in StreamableHTTP.pm ~698 (Header da, Body-Wert null/fehlend), nicht angefasst. README.md beschreibt weiter 0.001 und nennt Header-Erzwingung nicht -> k36/pod-writer. Sibling: Client-Walk _header_params nur gelesen, nichts nachzuziehen.
+
+2026-10-15 15:54 Von Getty bestätigt (string-Typvergleich und Header-Auflösung über Annotationsnamen).
+
+2026-10-15 16:06 Nachtrag: Commit b6a4d75 - Warnung 'uninitialized $body_value' beseitigt, Ergebnis unverändert. Offen: leerer Mcp-Param-Header + null/fehlender Body-Wert matcht weiterhin (200), 'eq'-Semantik unverändert gelassen.
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

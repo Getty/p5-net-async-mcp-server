@@ -257,6 +257,35 @@ subtest 'prompts/get unknown name returns -32602' => sub {
     like($response->{error}{message}, qr/unknown prompt/i, 'message mentions unknown prompt');
 };
 
+subtest 'prompts/get missing required argument returns -32602 without running code' => sub {
+    my $server = Net::Async::MCP::Server->new;
+    my $ran = 0;
+    $server->register_prompt(
+        name      => 'greet',
+        arguments => [ { name => 'who', required => 1 }, { name => 'mood' } ],
+        code      => sub { $ran++; return 'hi' },
+    );
+
+    for my $args ( {}, { mood => 'x' }, { who => undef } ) {
+        my $response = $server->handle(_req(
+            method => 'prompts/get',
+            id     => 30,
+            params => _params( name => 'greet', arguments => $args ),
+        ));
+        is($response->{error}{code}, -32602, 'code -32602');
+        is($response->{error}{message}, "Invalid params: missing required argument 'who'", 'message');
+    }
+    is($ran, 0, 'code not invoked');
+
+    my $ok = $server->handle(_req(
+        method => 'prompts/get',
+        id     => 31,
+        params => _params( name => 'greet', arguments => { who => 'W' } ),
+    ));
+    ok(!$ok->{error}, 'present required argument passes');
+    is($ran, 1, 'code invoked');
+};
+
 subtest 'capabilities advertise prompts only when >=1 prompt registered' => sub {
     my $empty = Net::Async::MCP::Server->new;
     my $empty_response = $empty->handle(_req(method => 'server/discover', id => 11));

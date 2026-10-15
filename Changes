@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - prompts/get checks required arguments: a registered argument with a true
+    "required" that is not defined in params.arguments returns -32602
+    "Invalid params: missing required argument 'x'" before the prompt code
+    runs.
+
   - tools/call: a tool result carrying structuredContent but no content
     array now gets a text content block with the JSON-serialized
     structuredContent (CallToolResult requires content; the spec asks for

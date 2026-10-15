@@ -440,7 +440,9 @@ sub register_prompt {
 
 Registers a prompt. Expects C<name>, optional C<title>, C<description> and an
 C<arguments> ArrayRef, and a C<code> reference invoked with the request
-arguments when the prompt is fetched.
+arguments when the prompt is fetched. An C<arguments> entry with a true
+C<required> must be present in C<prompts/get> or the request fails with
+C<-32602> before C<code> runs.
 
 =cut
 
@@ -798,8 +800,9 @@ C<prompts/list> dispatches to C<list_prompts>.
 =item *
 
 C<prompts/get> looks up C<params.name> in the prompt registry (unregistered
-name: C<-32602>) and dispatches to C<get_prompt> with C<params.name> and
-C<params.arguments>.
+name: C<-32602>), checks that every registered argument with a true
+C<required> is defined in C<params.arguments> (missing: C<-32602>), and
+dispatches to C<get_prompt> with C<params.name> and C<params.arguments>.
 
 =item *
 
@@ -1028,6 +1031,19 @@ sub _handle_prompts_get {
     return _jsonrpc_error(
       -32602,
       "Invalid params: unknown prompt '$name'",
+      $id,
+    );
+  }
+
+  # Protocol error: a registered argument marked required must be present.
+  for my $def ( @{ $prompt->{arguments} // [] } ) {
+    next unless ref $def eq 'HASH' && $def->{required};
+    my $arg = $def->{name};
+    next unless defined $arg;
+    next if ref $args eq 'HASH' && defined $args->{$arg};
+    return _jsonrpc_error(
+      -32602,
+      "Invalid params: missing required argument '$arg'",
       $id,
     );
   }

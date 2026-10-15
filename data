@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-10-15T16:16:21Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:16:21Z
+created: 2026-10-06T19:46:30Z
+id: 45
+priority: low
+started: 2026-10-15T16:03:25Z
+status: done
+tags:
+- server
+- api
+- review-2026-10-06
+title: register_tool/register_resource/register_prompt nehmen denselben Namen zweimal
+  an
+updated: 2026-10-15T16:16:21Z
+---
+
+## Befund
+
+`_register` (`lib/Net/Async/MCP/Server.pm:101-105`) hängt jede Definition an die Liste an, ohne auf den Schlüssel zu prüfen. Wer `register_tool(name => 't', ...)` zweimal ruft, bekommt in `tools/list` zwei Einträge mit demselben Namen, während `_find` (`Server.pm:107-114`) immer den ersten liefert — die zweite Registrierung ist beworben, aber nie aufrufbar.
+
+    tools/list -> t:d, t:second      # nachgestellt
+
+Doppelte Tool-Namen in `tools/list` sind für Clients undefiniert (die meisten bauen eine Map nach Name).
+
+## Fertig
+
+Entscheidung und Umsetzung: entweder `croak` bei doppeltem Schlüssel oder ersetzen (letzte Registrierung gewinnt, in Liste und Lookup gleich). POD von `register_*` nennt das Verhalten, Test in `t/01-basic.t`.
+
+---
+Fleet review 2026-10-06 · kind: improvement · confidence: verified
+
+2026-10-15 04:52 Nicht umgesetzt (Verhaltenswechsel, Entscheidung vorbehalten, keine abwärtskompatible Variante genannt). Empfehlung: croak bei doppeltem Schlüssel in _register (fail loud, kein stilles Überschreiben; Subklassen, die absichtlich neu registrieren, fallen sofort auf). Alternative 'letzte gewinnt' wäre still. Umsetzung ~5 Zeilen in Server.pm:101-105 + POD register_* + Test t/01-basic.t. Von Getty zu bestätigen.
+
+2026-10-15 15:54 Entscheidung Getty: croak bei doppeltem Schlüssel.
+
+2026-10-15 16:03 Commit eff9db0, croak auf Entscheidung Getty. _register croakt bei vorhandenem Schlüssel (Tool/Prompt: name, Resource: uri), POD der drei register_*, Subtest in t/01 gegen altes lib/ rot, prove -lr t grün (116 Tests). Geprüft: Net::Async::MCP::Run und sunriser registrieren keine doppelten Tool-Namen. Randbefund: README erwähnt Duplikatverhalten nicht (pod-writer).
+
+2026-10-15 16:16 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

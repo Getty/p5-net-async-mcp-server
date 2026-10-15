@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-09-01T05:01:08Z
+id: 25
+priority: low
+status: backlog
+tags:
+- deferred
+- protocol
+title: 'Deferred: pagination (cursor/nextCursor on list methods)'
+updated: 2026-10-15T05:05:27Z
+---
+
+tools/list, resources/list, prompts/list return a single complete page. Client _list_all treats absent nextCursor as complete, so gracefully absent, not a lie. Add cursor/nextCursor when a registry can grow large.
+
+2026-10-15 05:05 Nicht angefasst: Karte ist 'deferred, wenn Registry groß wird'; Cursor-Format und Seitengröße sind Public-API-Design (Maintainer). Empfehlung falls gewünscht: opaker Cursor = base64(offset), page_size-Attribut am Server, Default undef = heute (eine Seite, abwärtskompatibel); tools/list, resources/list, prompts/list gemeinsam. Client _list_all im Sibling behandelt fehlendes nextCursor bereits als vollständig.

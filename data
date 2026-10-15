@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-10-15T16:16:00Z
+claimed_by: p5-net-async-mcp-server
+class: standard
+completed: 2026-10-15T16:16:00Z
+created: 2026-10-06T19:46:18Z
+id: 43
+priority: medium
+started: 2026-10-15T04:51:14Z
+status: done
+tags:
+- bug
+- spec
+- interop
+- review-2026-10-06
+title: 'tools/call: isError geht als Zahl (0/1) statt als JSON-Boolean über den Draht'
+updated: 2026-10-15T16:16:00Z
+---
+
+## Befund
+
+Im 2026-Pfad setzt `_handle_tools_call` bei einem sterbenden Tool `isError => 1` (`lib/Net/Async/MCP/Server.pm:893`), und ein vom Tool durchgereichtes Result (`Server.pm:908-912`) behält, was das Tool geliefert hat. Beides landet als JSON-Zahl im Result:
+
+    perl -Ilib -MNet::Async::MCP::Server -MJSON::MaybeXS -e '...register_tool(code => sub { die "boom\n" })...'
+    {"content":[{"text":"boom\n","type":"text"}],"isError":1,"resultType":"complete",...}
+
+`CallToolResult.isError` ist im Schema `boolean`. Clients, die das Result gegen das Schema validieren (das TypeScript-SDK tut das mit zod), lehnen `1` ab. Der Legacy-Pfad macht es richtig: `_legacy_boolean` (`Server.pm:685`) und `JSON::MaybeXS::true()` in `Server.pm:628`.
+
+Betrifft auch Subklassen: Net::Async::MCP::Run liefert `isError => $exit != 0 ? 1 : 0` und kommt so als `"isError":0` bzw. `1` heraus.
+
+## Fertig
+
+- Fehlerzweig in `_handle_tools_call` setzt `JSON::MaybeXS::true()`.
+- Im Rich-Content-Durchreichzweig wird ein vorhandenes `isError` auf ein JSON-Boolean normalisiert (derselbe Helfer wie im Legacy-Pfad), damit Tool-Autoren weiter Perl-Wahrheitswerte zurückgeben können.
+- Test in `t/02-protocol-2026-07-28.t`, der das kodierte JSON prüft (`"isError":true`), nicht nur den Perl-Wahrheitswert.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-15 04:52 Commit 1471942. Fehlerzweig und Rich-Content-Durchreichzweig in _handle_tools_call liefern JSON-Boolean (_legacy_boolean, Shallow-Copy). Test t/02 'isError is a JSON boolean on the wire' prüft kodiertes JSON; gegen altes lib/ rot ("isError":0), danach prove -lr t grün (7 Dateien/103 Tests). Randbefund: der resultType-Durchreichzweig (MRTR) normalisiert isError weiterhin nicht - Karte nennt nur den Rich-Content-Zweig, Entscheidung bei Getty. Net::Async::MCP::Run profitiert ohne Änderung.
+
+2026-10-15 16:06 Nachtrag: Commit ecb6434 - resultType-Durchreichzweig normalisiert isError ebenfalls (Test rot gegen altes lib/).
+
+2026-10-15 16:15 Review: Diff gelesen (Server.pm/Stdio/StreamableHTTP), Tests rot->grün belegt, keine blockierenden Befunde; auf main (b6a4d75), gepusht.

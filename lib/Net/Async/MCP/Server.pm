@@ -318,7 +318,9 @@ A hashref carrying a C<content> arrayref and/or a C<structuredContent> key
 (but no C<resultType>) is passed through verbatim, wrapped in a C<complete>
 result. This lets a tool return its own content blocks — images, multiple
 text blocks, structured output — instead of the single stringified text
-block the default wrapping produces.
+block the default wrapping produces. When only C<structuredContent> is
+given, a C<content> array with one text block holding its JSON encoding is
+added.
 
 =back
 
@@ -932,6 +934,12 @@ sub _handle_tools_call {
     # isError is a schema boolean; tool authors may return Perl truthiness.
     $result = { %$result, isError => $self->_legacy_boolean( $result->{isError} ) }
       if exists $result->{isError};
+    # CallToolResult requires content; for backwards compatibility the
+    # spec says structured content SHOULD also be serialized as text.
+    $result = {
+      %$result,
+      content => [ { type => 'text', text => encode_json( $result->{structuredContent} ) } ],
+    } if exists $result->{structuredContent} && ref $result->{content} ne 'ARRAY';
     return $self->_jsonrpc_response( $result, $id );
   }
 

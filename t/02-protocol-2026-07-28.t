@@ -674,7 +674,7 @@ subtest 'tools/call rich content: content arrayref and structuredContent pass th
     is($r->{structuredContent}{total}, 42, 'structuredContent passed through');
 };
 
-subtest 'tools/call rich content: structuredContent alone (no content key) passes through' => sub {
+subtest 'tools/call rich content: structuredContent alone gets a serialized text content block' => sub {
     my $server = Net::Async::MCP::Server->new;
     $server->register_tool(
         name        => 'structured_only_tool',
@@ -696,8 +696,12 @@ subtest 'tools/call rich content: structuredContent alone (no content key) passe
 
     my $r = $response->{result};
     is($r->{resultType}, 'complete', 'resultType filled in as complete');
-    ok(!exists $r->{content}, 'no content key added by default wrapping');
     ok($r->{structuredContent}{ok}, 'structuredContent passed through verbatim');
+    is(ref $r->{content}, 'ARRAY', 'content key supplied');
+    is(scalar @{ $r->{content} }, 1, 'one content block');
+    is($r->{content}[0]{type}, 'text', 'block is text');
+    is(JSON::MaybeXS::decode_json($r->{content}[0]{text}), { ok => T() },
+        'text is the serialized structuredContent');
 };
 
 subtest 'tools/call tool returning a Future is awaited before wrapping' => sub {

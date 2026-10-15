@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - tools/call: a tool result carrying structuredContent but no content
+    array now gets a text content block with the JSON-serialized
+    structuredContent (CallToolResult requires content; the spec asks for
+    the backwards-compatible text block).
+
   - StreamableHTTP enforces x-mcp-header from the registered inputSchema: an
     annotated argument with a non-null value but no Mcp-Param-{Name} header
     is rejected with 400/-32020. Only chains of "properties" keys are

@@ -12,7 +12,7 @@ use IO::Handle;
 use JSON::MaybeXS qw( encode_json decode_json );
 use Scalar::Util qw( weaken );
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 =head1 SYNOPSIS
 

@@ -1,5 +1,7 @@
 Revision history for Net-Async-MCP-Server
 
+{{$NEXT}}
+
 0.002     2026-10-18 23:30:05Z
 
   - StreamableHTTP: an Mcp-Param-* header whose body argument is null or

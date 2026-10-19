@@ -12,7 +12,7 @@ use Encode      qw( decode FB_DEFAULT );
 use Scalar::Util qw( looks_like_number );
 use HTTP::Server::PSGI;
 
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 
 =head1 SYNOPSIS
 

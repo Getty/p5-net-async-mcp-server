@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-10-19T01:10:37Z
+created: 2026-10-19T01:07:31Z
+id: 46
+priority: high
+started: 2026-10-19T01:10:37Z
+status: done
+tags:
+- deps
+title: Laufzeit braucht JSON::MaybeXS 1.004 (true/false), cpanfile verlangt keine
+  Version
+updated: 2026-10-19T01:10:37Z
+---
+
+lib/Net/Async/MCP/Server.pm ruft JSON::MaybeXS::true()/false() (isError, Booleans), die Tests ebenso. Die Subs gibt es erst ab JSON::MaybeXS 1.004000. cpanfile verlangt JSON::MaybeXS ohne Version: auf einer Installation mit 1.003002 (SunRiser-Update-Server, perl 5.20.1) stirbt der Server beim ersten Tool-Aufruf statt beim Installieren. Fertig: runtime requires JSON::MaybeXS 1.004.
+
+2026-10-19 01:10 Erledigt in f28b9a0; t/ grün lokal (perl 5.40) und auf dem SunRiser-Update-Server (perl 5.20.1, JSON::MaybeXS 1.004008).

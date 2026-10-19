@@ -2,6 +2,11 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - Requires JSON::MaybeXS 1.004 now. The results are built with
+    JSON::MaybeXS::true and ::false, which only exist since 1.004000; with an
+    older one the server installed and then died at its first tool call
+    instead of refusing to install (k46)
+
 0.002     2026-10-18 23:30:05Z
 
   - StreamableHTTP: an Mcp-Param-* header whose body argument is null or

@@ -1,0 +1,63 @@
+{"action":"move","agent":"worker-b","detail":"done","task_id":37,"ts":"2026-09-10T02:14:42Z"}
+{"action":"edit","agent":"worker-b","detail":"in-progress","task_id":38,"ts":"2026-09-10T02:14:46Z"}
+{"action":"move","agent":"worker-b","detail":"done","task_id":38,"ts":"2026-09-10T02:14:50Z"}
+{"action":"edit","agent":"worker-b","detail":"in-progress","task_id":17,"ts":"2026-09-10T02:15:03Z"}
+{"action":"move","agent":"worker-b","detail":"done","task_id":17,"ts":"2026-09-10T02:15:07Z"}
+{"action":"edit","agent":"worker-b","detail":"in-progress","task_id":35,"ts":"2026-09-10T02:15:11Z"}
+{"action":"move","agent":"worker-b","detail":"done","task_id":35,"ts":"2026-09-10T02:15:16Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":41,"ts":"2026-09-10T02:15:55Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":36,"ts":"2026-09-10T02:16:36Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":42,"ts":"2026-10-06T19:46:12Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":43,"ts":"2026-10-06T19:46:18Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":44,"ts":"2026-10-06T19:46:24Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":45,"ts":"2026-10-06T19:46:30Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":42,"ts":"2026-10-15T04:48:48Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":42,"ts":"2026-10-15T04:51:14Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":43,"ts":"2026-10-15T04:51:14Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":43,"ts":"2026-10-15T04:52:15Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":44,"ts":"2026-10-15T04:52:16Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":45,"ts":"2026-10-15T04:52:56Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":44,"ts":"2026-10-15T04:53:01Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":39,"ts":"2026-10-15T04:53:02Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":39,"ts":"2026-10-15T04:55:42Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":34,"ts":"2026-10-15T04:55:43Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":34,"ts":"2026-10-15T05:03:17Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":36,"ts":"2026-10-15T05:03:17Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":36,"ts":"2026-10-15T05:04:38Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":18,"ts":"2026-10-15T05:04:39Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":18,"ts":"2026-10-15T05:05:24Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":18,"ts":"2026-10-15T05:05:25Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":24,"ts":"2026-10-15T05:05:26Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":25,"ts":"2026-10-15T05:05:27Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":41,"ts":"2026-10-15T05:05:28Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":18,"ts":"2026-10-15T15:54:33Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":18,"ts":"2026-10-15T15:54:34Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":45,"ts":"2026-10-15T15:54:36Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":34,"ts":"2026-10-15T15:54:37Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":39,"ts":"2026-10-15T15:54:37Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":18,"ts":"2026-10-15T16:02:19Z"}
+{"action":"handoff","agent":"p5-net-async-mcp-server","detail":"review","task_id":45,"ts":"2026-10-15T16:03:25Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":42,"ts":"2026-10-15T16:05:44Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":43,"ts":"2026-10-15T16:06:41Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":44,"ts":"2026-10-15T16:06:42Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":39,"ts":"2026-10-15T16:06:44Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":18,"ts":"2026-10-15T16:15:00Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":18,"ts":"2026-10-15T16:15:06Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":34,"ts":"2026-10-15T16:15:12Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":34,"ts":"2026-10-15T16:15:17Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":36,"ts":"2026-10-15T16:15:22Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":36,"ts":"2026-10-15T16:15:27Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":39,"ts":"2026-10-15T16:15:32Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":39,"ts":"2026-10-15T16:15:38Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":42,"ts":"2026-10-15T16:15:44Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":42,"ts":"2026-10-15T16:15:49Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":43,"ts":"2026-10-15T16:15:55Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":43,"ts":"2026-10-15T16:16:00Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":44,"ts":"2026-10-15T16:16:05Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":44,"ts":"2026-10-15T16:16:10Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"review","task_id":45,"ts":"2026-10-15T16:16:15Z"}
+{"action":"move","agent":"p5-net-async-mcp-server","detail":"done","task_id":45,"ts":"2026-10-15T16:16:21Z"}
+{"action":"create","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":46,"ts":"2026-10-19T01:07:31Z"}
+{"action":"edit","agent":"p5-net-async-mcp-server","detail":"in-progress","task_id":46,"ts":"2026-10-19T01:10:26Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":46,"ts":"2026-10-19T01:10:32Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":46,"ts":"2026-10-19T01:10:37Z"}

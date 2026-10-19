@@ -1,6 +1,6 @@
 Revision history for Net-Async-MCP-Server
 
-{{$NEXT}}
+0.003     2026-10-19 02:13:42Z
 
   - Requires JSON::MaybeXS 1.004 now. The results are built with
     JSON::MaybeXS::true and ::false, which only exist since 1.004000; with an

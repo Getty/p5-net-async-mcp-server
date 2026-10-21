@@ -9,6 +9,7 @@ briefing:
     - perl-io-async-future
     - kanban-issues-karr-ticket
     - getty-perl-pod
+    - mcp-server-core
 ---
 
 You are the mcp-server-worker for **Net::Async::MCP::Server**, an async MCP (Model

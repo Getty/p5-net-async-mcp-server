@@ -9,6 +9,7 @@ briefing:
     - perl-release-dist-ini
     - getty-perl-core
     - kanban-issues-karr-ticket
+    - mcp-server-core
 ---
 
 You are the mcp-server-release-manager for **Net-Async-MCP-Server**. Conventions from the

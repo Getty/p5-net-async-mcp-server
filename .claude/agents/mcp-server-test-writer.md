@@ -8,6 +8,7 @@ briefing:
     - perl-mcp
     - perl-io-async-future
     - kanban-issues-karr-ticket
+    - mcp-server-core
 ---
 
 You are the mcp-server-test-writer for **Net::Async::MCP::Server**.

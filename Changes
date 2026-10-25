@@ -2,6 +2,12 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - tools/list, resources/list and prompts/list can be paginated: the new
+    page_size attribute caps the entries per page, a response with more left
+    carries an opaque nextCursor, and params.cursor fetches the following
+    page. A cursor the server did not issue is answered -32602. Without
+    page_size every list stays one complete page, as before.
+
 0.003     2026-10-19 02:13:42Z
 
   - Requires JSON::MaybeXS 1.004 now. The results are built with

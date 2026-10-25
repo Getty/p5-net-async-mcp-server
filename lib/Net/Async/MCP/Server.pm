@@ -10,6 +10,7 @@ use Future::AsyncAwait;
 
 use JSON::MaybeXS qw( encode_json );
 use Carp qw( croak );
+use MIME::Base64 qw( encode_base64 decode_base64 );
 
 our $VERSION = '0.004';
 
@@ -142,12 +143,34 @@ sub configure {
   if (exists $params{legacy_compat}) {
     $self->{legacy_compat} = delete $params{legacy_compat} ? 1 : 0;
   }
+  if (exists $params{page_size}) {
+    my $size = delete $params{page_size};
+    croak 'page_size must be a positive integer or undef'
+      if defined $size && $size !~ /\A[1-9][0-9]*\z/;
+    $self->{page_size} = $size;
+  }
   $self->SUPER::configure(%params);
 }
 
 sub name { shift->{name} // 'NetAsyncMCPServer' }
 
 sub legacy_compat { shift->{legacy_compat} // 0 }
+
+sub page_size { shift->{page_size} }
+
+=method page_size
+
+Returns the maximum number of entries C<tools/list>, C<resources/list> and
+C<prompts/list> return per page, or C<undef> (the default) when each list is
+returned as one complete page. When set, a response that has more entries
+left carries an opaque C<nextCursor>, which the client passes back as
+C<params.cursor> to get the following page. Pass C<< page_size => $n >> to the
+constructor with a positive integer.
+
+A C<cursor> that was not issued by this server is answered with C<-32602>.
+Legacy C<tools/list> (see L</legacy_compat>) is never paginated.
+
+=cut
 
 =method legacy_compat
 
@@ -526,11 +549,11 @@ into a single C<user> text message.
 # needs (params, id) from those; this map replaces the former if/elsif ladder.
 my %DISPATCH = (
   'server/discover' => sub { $_[0]->_handle_discover( $_[2] ) },
-  'tools/list'      => sub { $_[0]->_handle_tools_list( $_[2] ) },
+  'tools/list'      => sub { $_[0]->_handle_tools_list( $_[1]->{params} // {}, $_[2] ) },
   'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2] ) },
-  'resources/list'  => sub { $_[0]->_handle_resources_list( $_[2] ) },
+  'resources/list'  => sub { $_[0]->_handle_resources_list( $_[1]->{params} // {}, $_[2] ) },
   'resources/read'  => sub { $_[0]->_handle_resources_read( $_[1]->{params} // {}, $_[2] ) },
-  'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[2] ) },
+  'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[1]->{params} // {}, $_[2] ) },
   'prompts/get'     => sub { $_[0]->_handle_prompts_get( $_[1]->{params} // {}, $_[2] ) },
 );
 
@@ -891,16 +914,46 @@ sub _handle_discover {
   return $self->_jsonrpc_response( $result, $id );
 }
 
-sub _handle_tools_list {
-  my ( $self, $id ) = @_;
+# Slice a complete list into the page params.cursor asks for. Returns the
+# page and the extra result keys (nextCursor when more is left), or undef and
+# a JSON-RPC error when the cursor is not one this server issued. The cursor
+# is opaque to clients: base64 of the offset of the first entry of the page.
+sub _paginate {
+  my ( $self, $items, $params, $id ) = @_;
 
-  my $tools = $self->list_tools->get;
+  my $size = $self->page_size;
+  return ( $items, {} ) unless defined $size;
+
+  my $offset = 0;
+  if ( exists $params->{cursor} ) {
+    my $cursor = $params->{cursor};
+    my $bad    = _jsonrpc_error( -32602, 'Invalid params: invalid cursor', $id );
+    return ( undef, $bad ) if !defined $cursor || ref $cursor;
+    my $plain = $cursor =~ m{\A[A-Za-z0-9+/]+={0,2}\z} ? decode_base64($cursor) : '';
+    return ( undef, $bad ) unless $plain =~ /\Aoffset:([0-9]+)\z/;
+    $offset = $1;
+    return ( undef, $bad ) if $offset > @{$items};
+  }
+
+  my $end  = $offset + $size;
+  my $last = ( $end < @{$items} ? $end : scalar @{$items} ) - 1;
+  my %extra;
+  $extra{nextCursor} = encode_base64( "offset:$end", '' ) if $end < @{$items};
+  return ( [ @{$items}[ $offset .. $last ] ], \%extra );
+}
+
+sub _handle_tools_list {
+  my ( $self, $params, $id ) = @_;
+
+  my ( $tools, $extra ) = $self->_paginate( $self->list_tools->get, $params, $id );
+  return $extra unless $tools;
   return $self->_jsonrpc_response(
     {
       resultType => 'complete',
       tools      => $tools,
       ttlMs      => 300000,
       cacheScope => 'public',
+      %{$extra},
     },
     $id,
   );
@@ -987,13 +1040,15 @@ sub _handle_tools_call {
 }
 
 sub _handle_resources_list {
-  my ( $self, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-  my $resources = $self->list_resources->get;
+  my ( $resources, $extra ) = $self->_paginate( $self->list_resources->get, $params, $id );
+  return $extra unless $resources;
   return $self->_jsonrpc_response(
     {
       resultType => 'complete',
       resources  => $resources,
+      %{$extra},
     },
     $id,
   );
@@ -1030,13 +1085,15 @@ sub _handle_resources_read {
 }
 
 sub _handle_prompts_list {
-  my ( $self, $id ) = @_;
+  my ( $self, $params, $id ) = @_;
 
-  my $prompts = $self->list_prompts->get;
+  my ( $prompts, $extra ) = $self->_paginate( $self->list_prompts->get, $params, $id );
+  return $extra unless $prompts;
   return $self->_jsonrpc_response(
     {
       resultType => 'complete',
       prompts    => $prompts,
+      %{$extra},
     },
     $id,
   );

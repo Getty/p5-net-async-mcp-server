@@ -178,6 +178,16 @@ Returns the server name exposed via MCP protocol. Default is
 Returns whether the Stdio-only MCP 2025-11-25 compatibility path was enabled
 with `legacy_compat => 1`. The default is false.
 
+## page_size
+
+    my $size = $server->page_size;
+
+Maximum entries per page for `tools/list`, `resources/list` and
+`prompts/list`; `undef` (the default) returns each list as one complete page.
+When set, a response with more entries left carries an opaque `nextCursor`,
+passed back as `params.cursor` for the next page. A cursor this server did not
+issue is answered with `-32602`. Legacy `tools/list` is never paginated.
+
 ## server_info
 
     my $info = $server->server_info;

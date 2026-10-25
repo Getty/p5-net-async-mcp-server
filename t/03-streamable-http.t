@@ -633,13 +633,10 @@ subtest 'POST to unknown path returns 404' => sub {
     is($res->code, 404, '404 Not Found');
 };
 
-subtest 'subscriptions/listen returns 404 -32601 Method not found' => sub {
-    # subscriptions/listen was removed: there is no server->client push
-    # channel to deliver it in this version, so it falls through handle()'s
-    # normal dispatch and comes back as a plain JSON-RPC -32601, the same
-    # answer any other unknown method gets — not an SSE acknowledgement. Per
-    # the streamable-http spec an unimplemented RPC method is 404 Not Found,
-    # which is how clients tell a modern server from a legacy one.
+subtest 'subscriptions/listen needs an SSE Accept' => sub {
+    # subscriptions/listen opens a long-lived stream (see t/09-notifications.t);
+    # a client that does not accept text/event-stream cannot receive it, and is
+    # told so rather than handed a stream it cannot read.
     my $server = _make_server;
     my $t = Net::Async::MCP::Server::Transport::StreamableHTTP->new(
         server             => $server,
@@ -670,13 +667,13 @@ subtest 'subscriptions/listen returns 404 -32601 Method not found' => sub {
     );
     my $res = $test->request($req);
 
-    is($res->code, 404, '404 Not Found (unimplemented RPC method)');
+    is($res->code, 400, '400 Bad Request');
     is($res->content_type, 'application/json', 'plain JSON, not SSE');
 
     my $body = _decode_ok($res->content);
     is($body->{id}, 'sub-1', 'id echoed back');
-    ok(exists $body->{error}, 'error field present');
-    is($body->{error}{code}, -32601, 'JSON-RPC error -32601 Method not found');
+    is($body->{error}{code}, -32602, 'JSON-RPC error -32602 Invalid params');
+    is($server->notification_sink_count, 0, 'no sink registered');
 };
 
 subtest 'configure defaults are loopback + 8080 + /mcp' => sub {

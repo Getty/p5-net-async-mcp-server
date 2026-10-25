@@ -53,13 +53,37 @@ headers|https://modelcontextprotocol.io/specification/2026-07-28/basic/transport
 against the JSON-RPC body, and answers each request with either an
 C<application/json> response or a C<text/event-stream> stream.
 
-The transport is a thin wrapper around L<Net::Async::MCP::Server/handle>: the
-PSGI handler decodes the envelope and hands the request to C<handle()>. The
+The transport is a thin wrapper around L<Net::Async::MCP::Server/handle_f>: the
+PSGI handler decodes the envelope and hands the request to C<handle_f()>.
+A request that waits on I/O is answered with a delayed PSGI response, so
+nothing blocks the loop while it waits. The
 spec-mandated header checks run first, but only for requests that carry an
 C<id> — a notification (no C<id>) skips them entirely and goes straight to
-C<handle()>, since the 2026-07-28 spec does not define header requirements
+C<handle_f()>, since the 2026-07-28 spec does not define header requirements
 for notification POSTs. Method implementations live in
 L<Net::Async::MCP::Server>; this module is the HTTP layer and nothing else.
+
+=head1 SERVER-INITIATED NOTIFICATIONS
+
+Two things can stream a notification the server initiates (see
+L<Net::Async::MCP::Server/emit_notification>) to the client.
+
+A C<tools/call> sent with C<Accept: text/event-stream> and a
+C<_meta.progressToken> streams the C<notifications/progress> of that call as
+SSE events ahead of the response, which is the last event; the stream opens
+at the first of them. A client that does not accept C<text/event-stream> gets
+a plain JSON response and no progress.
+
+C<subscriptions/listen>, sent with C<Accept: text/event-stream>, opens a
+long-lived SSE stream that carries every notification the server emits from
+then on: list changes, log records and the progress of calls without a
+stream of their own. C<params.notifications> narrows it to the listed
+notifications (C<tools/list_changed>, C<message>, ...); without it the stream
+carries all of them. There is no response event; the stream opening is the
+acknowledgement. The stream ends when the client closes the connection, which
+the transport notices on its next write. Sent without C<Accept:
+text/event-stream> the request is answered C<-32602>. A GET on the endpoint
+stays C<405>.
 
 =head1 PROTOCOL
 
@@ -467,7 +491,7 @@ sub _handle_request {
   # "header requirements for notification POSTs are not defined by this
   # revision", so we skip the full header validation path here.
   if ( !defined $request->{id} ) {
-    $self->server->handle($request);
+    $self->server->handle_f($request)->retain;
     return $self->_accepted_response();
   }
 
@@ -475,47 +499,127 @@ sub _handle_request {
     return $err;
   }
 
-  # subscriptions/listen has no server->client push channel to deliver
-  # *ListChanged in 0.002, so it falls through to handle() and gets the
-  # normal -32601 — the same answer the Stdio transport gives. Real push
-  # delivery is deferred to k24.
+  return $self->_dispatch_request( $env, $request );
+}
 
-  # Default: synchronous JSON-RPC dispatch. handle() returns either a
-  # response hashref or undef (the no-id case we already handled above
-  # doesn't reach here, so undef here would be a malformed request —
-  # treat it as such).
-  my $response = $self->server->handle($request);
-  if ( !$response ) {
-    return $self->_json_rpc_error_response(
-      -32600, 'Invalid request', $request->{id},
-    );
-  }
+# Runs one request through the server's non-blocking handle_f and builds the
+# PSGI answer. A request that is already answered by the time handle_f returns
+# gets a plain PSGI response; one that is still waiting on I/O gets a delayed
+# one (the coderef form), so neither the loop nor the HTTP server is blocked.
+#
+# Notifications bound to this request (a tools/call's progress) can only be
+# delivered on an SSE answer: they are collected until that answer opens and
+# written ahead of the JSON-RPC response. A client that did not ask for
+# text/event-stream gets none of them.
+sub _dispatch_request {
+  my ( $self, $env, $request ) = @_;
 
-  # The client's Accept governs whether we wrap as JSON or as SSE. The
-  # spec gives the server the choice per request, and clients that send
-  # both content types leave it free. We pick the one the client says it
-  # can handle; absent Accept, default to application/json.
   my $accept = $env->{HTTP_ACCEPT} // '';
   my $sse    = $accept =~ m{text/event-stream}i;
 
-  if ( $sse && ( $response->{error} || !$response->{result} ) ) {
-    # Errors and notifications don't naturally stream; SSE alone won't
-    # carry a JSON-RPC error in any spec-mandated way. Stay on JSON.
-    $sse = 0;
+  my ( @buffer, $respond, $writer, $listen_methods );
+
+  # Opens the stream if it is not open yet (and can be) and writes $message.
+  my $emit = sub {
+    my ( $message ) = @_;
+    push @buffer, $message if defined $message;
+    return unless $respond;
+    $writer //= $respond->( [ 200, $self->_sse_headers ] );
+    $writer->write( $self->_format_sse_event( '', encode_json($_) ) ) for splice @buffer;
+  };
+
+  my $context = {
+    transport => 'http',
+    notify    => sub { $emit->( $_[0] ) if $sse; Future->done },
+    listen    => sub { $listen_methods = $_[0] },
+  };
+
+  my $f = $self->server->handle_f( $request, $context );
+
+  my $internal_error = sub {
+    chomp( my $msg = $_[0] // 'unknown error' );
+    return {
+      jsonrpc => '2.0',
+      id      => $request->{id},
+      error   => { code => -32603, message => "Internal error: $msg" },
+    };
+  };
+
+  # The PSGI value for a response that exists. Either a plain response or a
+  # coderef taking the responder.
+  my $answer = sub {
+    my ( $response ) = @_;
+
+    if ( $listen_methods && !$response ) {
+      return $self->_json_rpc_error_response(
+        -32602, 'Invalid params: subscriptions/listen requires Accept: text/event-stream',
+        $request->{id},
+      ) unless $sse;
+      return $self->_listen_stream($listen_methods);
+    }
+
+    return $self->_json_rpc_error_response( -32600, 'Invalid request', $request->{id} )
+      unless $response;
+
+    # Errors and notifications don't naturally stream; SSE alone won't carry
+    # a JSON-RPC error in any spec-mandated way. Stay on JSON.
+    return $self->_json_response( $response, $self->_http_status_for_response($response) )
+      if !$sse || $response->{error} || !$response->{result};
+
+    return sub {
+      $respond = $_[0];
+      $emit->($response);
+      $writer->close;
+      return;
+    };
+  };
+
+  if ( $f->is_ready ) {
+    return $answer->( $f->is_failed ? $internal_error->( $f->failure ) : $f->get );
   }
 
-  if ( $sse ) {
-    return $self->_handle_sse_stream($env, $request, $response);
-  }
+  return sub {
+    $respond = $_[0];
+    $emit->() if @buffer;    # progress that came before the delay began
 
-  # A spec-mandated JSON-RPC error takes its matching HTTP status (404 for
-  # method-not-found, 400 for a protocol/version parity error); everything
-  # else stays 200 with the payload in the body. Error responses never
-  # reach the SSE branch above - the downgrade already forced $sse off.
-  return $self->_json_response(
-    $response,
-    $self->_http_status_for_response($response),
-  );
+    $f->on_ready( sub {
+      my $response = $f->is_failed ? $internal_error->( $f->failure ) : $f->get;
+
+      # Already streaming: the response is the last event, whatever it is.
+      if ($writer) {
+        $emit->($response);
+        $writer->close;
+        return;
+      }
+
+      my $out = $answer->($response);
+      if ( ref $out eq 'CODE' ) { $out->($respond) } else { $respond->($out) }
+    } );
+    return;
+  };
+}
+
+# subscriptions/listen: a long-lived SSE stream. It stays open and carries the
+# notifications the server initiates, filtered to the methods the client asked
+# for, until the client goes away. There is no response event: the stream
+# opening is the acknowledgement.
+sub _listen_stream {
+  my ( $self, $methods ) = @_;
+
+  return sub {
+    my ( $respond ) = @_;
+    my $writer = $respond->( [ 200, $self->_sse_headers ] );
+    $self->server->add_notification_sink(
+      sub {
+        my ( $message ) = @_;
+        # A closed connection makes this die, which drops the sink.
+        $writer->write( $self->_format_sse_event( '', encode_json($message) ) );
+        return Future->done;
+      },
+      ( @{$methods} ? ( methods => $methods ) : () ),
+    );
+    return;
+  };
 }
 
 # --- Header validation per spec section "Server Validation" -------------
@@ -901,27 +1005,9 @@ sub _method_not_allowed_response {
 
 # --- SSE response path ----------------------------------------------------
 
-# A successful request that the client wants as SSE arrives here. We emit
-# the JSON-RPC response as the single SSE event so the client gets its
-# answer in the stream form it asked for; the stream is closed afterwards.
-# There is no keepalive: the single event is written and the stream closed
-# in the same call.
-sub _handle_sse_stream {
-  my ( $self, $env, $request, $response ) = @_;
-  my $jsonrpc = encode_json($response);
-
-  return sub {
-    my ( $respond ) = @_;
-    my $writer = $respond->([
-      200,
-      $self->_sse_headers,
-    ]);
-    $writer->write( $self->_format_sse_event( '', $jsonrpc ) );
-    $writer->close;
-    return;
-  };
-}
-
+# The answer to a request the client wants as SSE is the JSON-RPC response as
+# the last event, after any notifications of the request itself; the stream is
+# closed afterwards. There is no keepalive.
 sub _sse_headers {
   return [
     'Content-Type'      => 'text/event-stream',

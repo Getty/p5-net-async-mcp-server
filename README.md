@@ -218,7 +218,7 @@ Handles the JSON-RPC `server/discover` request. Returns a `Future` that
 resolves to the discovery result: `resultType`, `supportedVersions`,
 `capabilities`, caching hints, and `_meta.io.modelcontextprotocol/serverInfo`.
 On the wire this is invoked as `server/discover`; the Perl method is named
-`discover` because it is what `handle()` calls.
+`discover` because it is what `handle_f()` calls.
 
 ## register_tool
 
@@ -367,10 +367,10 @@ JSON-RPC request or notification hashref (`jsonrpc`, `method`, and
 optionally `id` and `params`); transports decode wire JSON before calling
 this and encode whatever it returns.
 
-`handle` is synchronous, not a `Future`-returning method: it calls `->get`
-internally on the `Future`s from `discover`, `list_tools`, `call_tool`,
-`list_resources`, `read_resource`, `list_prompts` and `get_prompt`, and
-hands back a plain result.
+`handle` is the synchronous convenience over `handle_f`: it calls `->get`
+on the `Future` `handle_f` returns and hands back a plain result. It suits
+callers without an event loop, and tests; a `call_tool` that waits on I/O
+would block it. Transports use `handle_f`.
 
 If `$request` has a defined `id` key (`0` or `''` counts; only an absent
 key or a JSON `null` id does not), `handle` returns a JSON-RPC response or
@@ -400,6 +400,62 @@ The full set of JSON-RPC error codes `handle` itself can produce:
 `Net::Async::MCP::Server::Transport::StreamableHTTP`, not by `handle`.
 
 # TRANSPORTS
+
+## handle_f
+
+    my $future = $server->handle_f($request, $context);
+
+The core of the dispatch: everything `handle` says holds here, except that
+the result is a `Future` resolving to the response hashref (`undef` for a
+notification), and nothing blocks while `discover`, `call_tool` and the
+other methods wait on I/O. `$context` is an optional hashref set by the
+transport: `transport` names it, `notify` (a code reference taking a
+notification hashref and returning a `Future`) is where the request's own
+notifications go, i.e. the progress of a `tools/call`.
+
+## add_notification_sink / remove_notification_sink / notification_sink_count
+
+    my $token = $server->add_notification_sink( sub { ... }, methods => [ ... ] );
+    $server->remove_notification_sink($token);
+
+The registry of streams open to a client. A transport that holds one
+registers a sink (a code reference taking the complete JSON-RPC
+notification hashref, optionally returning a `Future`) for as long as the
+stream lives; `methods` restricts it to those notification methods. A sink
+that dies or whose `Future` fails is dropped.
+
+## emit_notification
+
+    my $future = $server->emit_notification( $method, $params );
+
+Sends a server-initiated notification to every sink that wants it. The
+`Future` resolves to the number of sinks it was offered to; it never fails
+because a sink did.
+
+## notify_list_changed
+
+    $server->notify_list_changed('tools');
+
+Sends `notifications/tools/list_changed` (or `resources`, `prompts`). The
+`register_*` methods call it themselves.
+
+## log / log_level
+
+    $server->log( warning => $data, $logger );
+
+Sends a `notifications/message` log record when its severity is at or above
+`log_level`: `info` until a client changes it with `logging/setLevel`. The
+level belongs to the server, not to a client; the protocol keeps no
+per-client state.
+
+## Progress
+
+A client that sends `_meta.progressToken` with `tools/call` gets
+`notifications/progress` from a tool that calls
+`$context->{progress}->( $progress, $total, $message )`, the second argument
+of a registered tool's `code` (`$total` and `$message` are optional). Without
+a token the call does nothing, so a tool may call it unconditionally. The
+progress goes to the stream of the request itself.
 
 ## Net::Async::MCP::Server::Transport::Stdio
 

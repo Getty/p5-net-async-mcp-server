@@ -10,7 +10,7 @@ use IO::Async::Loop;
 use IO::Async::Stream;
 use IO::Handle;
 use JSON::MaybeXS qw( encode_json decode_json );
-use Scalar::Util qw( weaken );
+use Scalar::Util qw( weaken refaddr );
 
 our $VERSION = '0.004';
 
@@ -51,8 +51,12 @@ Error format:
 
     {"jsonrpc": "2.0", "id": 1, "error": {"code": -32022, "message": "Unsupported protocol version", "data": {"supported": ["2026-07-28"]}}}
 
-Notifications from the client are accepted and discarded (C<handle()> returns
-C<undef>, nothing is written to stdout).
+Notifications from the client are accepted and discarded (C<handle_f()>
+resolves to C<undef>, nothing is written to stdout).
+
+Notifications the server initiates (see L<Net::Async::MCP::Server/emit_notification>)
+are written to stdout as the same kind of line while L</handle_requests> runs:
+the transport registers itself as a notification sink for that time.
 
 =cut
 
@@ -208,6 +212,7 @@ sub handle_requests {
     }
 
     my $eof_f = $loop->new_future;
+    $self->{_eof_f} = $eof_f;
 
     # The stream holds this callback and this transport holds the stream as a
     # child, so capturing $self strongly here would close a cycle no refcount
@@ -224,11 +229,24 @@ sub handle_requests {
             return $self->_on_read( $buffref, $eof );
         },
         on_read_eof => sub {
-            $eof_f->done unless $eof_f->is_ready;
+            # Requests still being answered finish before the shutdown; a
+            # slow tool's response is not lost to the client closing stdin.
+            my $self = $weak_self or return;
+            Future->wait_all( values %{ $self->{_pending} // {} } )->on_ready( sub {
+                $eof_f->done unless $eof_f->is_ready;
+            } );
         },
     );
 
     $self->add_child($stream);
+
+    # Notifications the server initiates (list changes, log records, progress)
+    # leave on the same line-oriented channel as the responses.
+    my $server = $self->server;
+    my $sink   = $server->add_notification_sink( sub {
+        my $self = $weak_self or return Future->done;
+        return $self->_send_response( $_[0] );
+    } );
 
     # A tool that dies no longer reaches here: handle() catches it and
     # answers with an isError result (resources/prompts: -32603). Only an
@@ -237,6 +255,9 @@ sub handle_requests {
     # out of the loop either way.
     my $ok  = eval { $eof_f->get; 1 };
     my $err = $@;
+
+    $server->remove_notification_sink($sink);
+    delete $self->{_eof_f};
 
     if ($wstream) {
         # A response queued when stdin closed must reach the client. The last
@@ -288,11 +309,27 @@ sub _handle_line {
         return;
     }
 
-    my $response = $self->server->handle(
+    # handle_f does not block the loop: a request that waits on I/O is
+    # answered when it is done, and the next line is read meanwhile. Responses
+    # therefore leave in completion order, which JSON-RPC allows.
+    my $f = $self->server->handle_f(
         $request,
         { transport => 'stdio' },
     );
-    $self->_send_response($response) if $response;
+    my $key = refaddr($f);
+    $self->{_pending}{$key} = $f;
+    $f->on_ready( sub {
+        delete $self->{_pending}{$key};
+        if ( $f->is_failed ) {
+            # Same as before handle_f: an exception out of the server
+            # leaves handle_requests.
+            my $eof_f = $self->{_eof_f};
+            $eof_f->fail( $f->failure ) if $eof_f and !$eof_f->is_ready;
+            return;
+        }
+        my $response = $f->get;
+        $self->_send_response($response) if $response;
+    } );
 
     return;
 }
@@ -301,11 +338,10 @@ sub _send_response {
     my ( $self, $response ) = @_;
     my $line = encode_json($response) . "\n";
     if ( my $wstream = $self->{_write_stream} ) {
-        $self->{_last_write_f} = $wstream->write($line);
-        return;
+        return $self->{_last_write_f} = $wstream->write($line);
     }
     print { $self->write_handle } $line;
-    return;
+    return Future->done;
 }
 
 1;

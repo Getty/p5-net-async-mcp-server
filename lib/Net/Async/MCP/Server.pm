@@ -6,6 +6,8 @@ use warnings;
 
 use parent 'IO::Async::Notifier';
 
+use Future;
+use Scalar::Util ();
 use Future::AsyncAwait;
 
 use JSON::MaybeXS qw( encode_json );
@@ -106,6 +108,7 @@ sub _register {
   croak ucfirst( $label ).q{ '}.$key.q{' is already registered}
     if $self->_find( $kind => $key );
   push @{ $self->{$kind} //= [] }, \%def;
+  $self->notify_list_changed($kind);
   return;
 }
 
@@ -212,9 +215,10 @@ Returns the server capabilities hashref.
 
 sub _build_capabilities {
   my ( $self ) = @_;
-  my %cap = ( tools => {} );
-  $cap{resources} = {} if @{ $self->resources };
-  $cap{prompts}   = {} if @{ $self->prompts };
+  my $changed = { listChanged => JSON::MaybeXS::true() };
+  my %cap = ( tools => {%$changed}, logging => {} );
+  $cap{resources} = {%$changed} if @{ $self->resources };
+  $cap{prompts}   = {%$changed} if @{ $self->prompts };
   return \%cap;
 }
 
@@ -315,24 +319,30 @@ optional C<title>, C<annotations>, C<outputSchema> when set).
 =cut
 
 async sub call_tool {
-  my ( $self, $name, $arguments ) = @_;
+  my ( $self, $name, $arguments, $context ) = @_;
 
   my $tool = $self->_find( tools => $name );
   croak "No tool registered: $name" unless $tool;
 
   if (my $code = $tool->{code}) {
-    my $result = $code->($arguments);
-    $result = await $result if ref $result eq 'Future';
+    my $result = $code->( $arguments, $context // $self->_tool_context );
+    $result = await $result if Scalar::Util::blessed($result) && $result->isa('Future');
     return $result;
   }
 
   croak "Tool '$name' has no implementation";
 }
 
-=method call_tool($name, $arguments)
+=method call_tool($name, $arguments, $context)
 
 Called when a client invokes a tool. Subclasses should override to provide
-tool implementations. Returns a Future that resolves to the tool's return
+tool implementations. C<$context> is optional; it is handed to a registered
+tool's C<code> reference as its second argument, after C<$arguments>, and is
+a hashref whose C<progress> entry is a code reference
+C<< ->( $progress, $total, $message ) >> that reports progress for this call
+(see L</emit_notification>); C<$total> and C<$message> are optional. It returns a
+L<Future>, and is a no-op that resolves immediately when the client did not
+send a C<progressToken>, so a tool may call it unconditionally. Returns a Future that resolves to the tool's return
 value, which the dispatch layer then wraps:
 
 =over
@@ -421,7 +431,7 @@ async sub read_resource {
   my $result;
   if ( my $code = $resource->{code} ) {
     $result = $code->($uri);
-    $result = await $result if ref $result eq 'Future';
+    $result = await $result if Scalar::Util::blessed($result) && $result->isa('Future');
   }
   else {
     croak "Resource '$uri' has no implementation";
@@ -506,7 +516,7 @@ async sub get_prompt {
   my $result;
   if ( my $code = $prompt->{code} ) {
     $result = $code->($arguments);
-    $result = await $result if ref $result eq 'Future';
+    $result = await $result if Scalar::Util::blessed($result) && $result->isa('Future');
   }
   else {
     croak "Prompt '$name' has no implementation";
@@ -544,20 +554,238 @@ into a single C<user> text message.
 
 =cut
 
+# --- Notifications: sink registry and fan-out ----------------------------
+
+my @LOG_LEVELS = qw( debug info notice warning error critical alert emergency );
+my %LOG_RANK   = map { $LOG_LEVELS[$_] => $_ } 0 .. $#LOG_LEVELS;
+
+sub add_notification_sink {
+  my ( $self, $sink, %opts ) = @_;
+  croak 'add_notification_sink requires a code reference'
+    unless ref $sink eq 'CODE';
+
+  my $methods = $opts{methods};
+  croak q{add_notification_sink: 'methods' must be an array reference}
+    if defined $methods && ref $methods ne 'ARRAY';
+
+  my $token = ++$self->{sink_seq};
+  $self->{sinks}{$token} = {
+    code    => $sink,
+    methods => $methods ? { map { $_ => 1 } @{$methods} } : undef,
+  };
+  return $token;
+}
+
+=method add_notification_sink($sink, %opts)
+
+Registers C<$sink> to receive server-initiated notifications and returns a
+token for L</remove_notification_sink>. A transport that holds a stream open
+to the client registers one for as long as the stream lives. C<$sink> is
+called with the complete JSON-RPC notification hashref (C<jsonrpc>,
+C<method>, C<params>) and may return a L<Future> that resolves once the
+message has been written. A sink that dies, or whose Future fails, is removed
+from the registry: its stream is gone.
+
+With C<< methods => [ ... ] >> the sink only sees notifications whose method
+is in the list; without it, it sees all of them.
+
+=cut
+
+sub remove_notification_sink {
+  my ( $self, $token ) = @_;
+  return defined $token && delete $self->{sinks}{$token} ? 1 : 0;
+}
+
+=method remove_notification_sink($token)
+
+Unregisters the sink C<$token> was returned for. Returns true if it was
+still registered.
+
+=cut
+
+sub notification_sink_count {
+  my ( $self ) = @_;
+  return scalar keys %{ $self->{sinks} // {} };
+}
+
+=method notification_sink_count
+
+The number of sinks currently registered.
+
+=cut
+
+sub emit_notification {
+  my ( $self, $method, $params ) = @_;
+  croak 'emit_notification requires a method' unless defined $method && length $method;
+
+  my %message = ( jsonrpc => '2.0', method => $method );
+  $message{params} = $params if defined $params;
+
+  my @pending;
+  my $sinks = $self->{sinks} // {};
+  for my $token ( sort { $a <=> $b } keys %{$sinks} ) {
+    my $entry = $sinks->{$token} or next;
+    next if $entry->{methods} && !$entry->{methods}{$method};
+
+    my $f = eval { $entry->{code}->( {%message} ) };
+    $f = Future->fail($@) if $@;
+    $f = Future->done unless ref $f && $f->isa('Future');
+    push @pending, $f->else( sub {
+      delete $self->{sinks}{$token};
+      return Future->done;
+    } )->then( sub { Future->done(1) } );
+  }
+
+  # Not returned directly: a caller that drops the Future (void context) must
+  # not make ->then warn.
+  my $all = Future->wait_all(@pending)->then( sub { Future->done( scalar @pending ) } );
+  return $all;
+}
+
+=method emit_notification($method, $params)
+
+Sends the notification C<$method> with the optional C<$params> hashref to
+every registered sink that wants it, and returns a L<Future> that resolves to
+the number of sinks it was offered to once all of them have finished. It never
+fails because a sink did: such a sink is dropped. With no sink registered it
+resolves to C<0> and nothing else happens.
+
+=cut
+
+sub notify_list_changed {
+  my ( $self, $kind ) = @_;
+  return Future->done(0) unless exists $REGISTRY{$kind};
+  return Future->done(0) unless $self->notification_sink_count;
+  my $f = $self->emit_notification("notifications/$kind/list_changed");
+  $f->retain;
+  return $f;
+}
+
+=method notify_list_changed($kind)
+
+Tells the clients that the C<tools>, C<resources> or C<prompts> list changed,
+with C<notifications/tools/list_changed> and its siblings. The C<register_*>
+methods call it themselves, so a tool registered while a client is listening
+reaches that client. Returns a L<Future> like L</emit_notification>.
+
+=cut
+
+sub log_level {
+  my ( $self ) = @_;
+  return $self->{log_level} // 'info';
+}
+
+=method log_level
+
+The lowest severity L</log> delivers, C<info> until a client changes it with
+C<logging/setLevel>. The level belongs to the server, not to a client: the
+2026-07-28 protocol keeps no per-client state between requests.
+
+=cut
+
+sub log {
+  my ( $self, $level, $data, $logger ) = @_;
+  croak "log: unknown level '".( $level // 'undef' )."'"
+    unless defined $level && exists $LOG_RANK{$level};
+
+  return Future->done(0) if $LOG_RANK{$level} < $LOG_RANK{ $self->log_level };
+
+  my %params = ( level => $level, data => $data );
+  $params{logger} = $logger if defined $logger;
+  return $self->emit_notification( 'notifications/message', \%params );
+}
+
+=method log($level, $data, $logger)
+
+Sends a C<notifications/message> log record to the listening clients, if
+C<$level> (one of C<debug>, C<info>, C<notice>, C<warning>, C<error>,
+C<critical>, C<alert>, C<emergency>) is at or above L</log_level>.
+C<$data> is any JSON-serialisable value, C<$logger> an optional name.
+Returns a L<Future> like L</emit_notification>.
+
+=cut
+
+# subscriptions/listen opens a long-lived stream, which only a transport that
+# has one can do: it supplies $context->{listen}. Everywhere else the method
+# stays unknown, as it was before there was a push channel (Stdio sends its
+# notifications without being asked).
+async sub _handle_subscriptions_listen {
+  my ( $self, $params, $id, $context ) = @_;
+
+  my $listen = ref $context eq 'HASH' ? $context->{listen} : undef;
+  return _jsonrpc_error( -32601, "Method 'subscriptions/listen' not found", $id )
+    unless $listen;
+
+  my $wanted = $params->{notifications};
+  return _jsonrpc_error( -32602, 'Invalid params: notifications must be an object', $id )
+    if defined $wanted && ref $wanted ne 'HASH';
+
+  # Keys name the notification without its "notifications/" prefix
+  # ("tools/list_changed"); none at all means everything.
+  $listen->( [ map { "notifications/$_" } sort keys %{ $wanted // {} } ] );
+  return undef;
+}
+
+async sub _handle_logging_set_level {
+  my ( $self, $params, $id ) = @_;
+
+  my $level = $params->{level};
+  unless ( defined $level && !ref $level && exists $LOG_RANK{$level} ) {
+    return _jsonrpc_error( -32602, 'Invalid params: invalid log level', $id );
+  }
+
+  $self->{log_level} = $level;
+  return $self->_jsonrpc_response( {}, $id );
+}
+
+# The context handed to a tool: progress() reports on this tools/call. The
+# progressToken comes from the request's _meta; without one it does nothing.
+# Notifications go to the stream of the request itself when the transport
+# supplied one ($context->{notify}), else to every sink.
+sub _tool_context {
+  my ( $self, $params, $request_context ) = @_;
+
+  my $token = ref $params eq 'HASH' && ref $params->{_meta} eq 'HASH'
+    ? $params->{_meta}{progressToken}
+    : undef;
+  return { progress => sub { Future->done(0) } } unless defined $token;
+
+  my $notify = ref $request_context eq 'HASH' ? $request_context->{notify} : undef;
+  return {
+    progressToken => $token,
+    progress      => sub {
+      my ( $progress, $total, $message ) = @_;
+      my %p = ( progressToken => $token, progress => $progress );
+      $p{total}   = $total   if defined $total;
+      $p{message} = $message if defined $message;
+      return $notify
+        ? $notify->( { jsonrpc => '2.0', method => 'notifications/progress', params => \%p } )
+        : $self->emit_notification( 'notifications/progress', \%p );
+    },
+  };
+}
+
 # JSON-RPC method -> handler, tried once per-request _meta has validated. Each
 # entry is invoked as $self->$handler( $request, $id ) and pulls whatever it
 # needs (params, id) from those; this map replaces the former if/elsif ladder.
 my %DISPATCH = (
   'server/discover' => sub { $_[0]->_handle_discover( $_[2] ) },
   'tools/list'      => sub { $_[0]->_handle_tools_list( $_[1]->{params} // {}, $_[2] ) },
-  'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2] ) },
+  'tools/call'      => sub { $_[0]->_handle_tools_call( $_[1]->{params} // {}, $_[2], $_[3] ) },
   'resources/list'  => sub { $_[0]->_handle_resources_list( $_[1]->{params} // {}, $_[2] ) },
   'resources/read'  => sub { $_[0]->_handle_resources_read( $_[1]->{params} // {}, $_[2] ) },
   'prompts/list'    => sub { $_[0]->_handle_prompts_list( $_[1]->{params} // {}, $_[2] ) },
   'prompts/get'     => sub { $_[0]->_handle_prompts_get( $_[1]->{params} // {}, $_[2] ) },
+  'subscriptions/listen' => sub { $_[0]->_handle_subscriptions_listen( $_[1]->{params} // {}, $_[2], $_[3] ) },
+  'logging/setLevel' => sub { $_[0]->_handle_logging_set_level( $_[1]->{params} // {}, $_[2] ) },
 );
 
 sub handle {
+  my ( $self, $request, $context ) = @_;
+  return $self->handle_f( $request, $context )->get;
+}
+
+async sub handle_f {
   my ( $self, $request, $context ) = @_;
 
   return _jsonrpc_error( -32700, 'Invalid JSON-RPC request' )
@@ -569,7 +797,7 @@ sub handle {
   return _jsonrpc_error( -32600, 'Missing JSON-RPC method', $id )
     unless defined $method;
 
-  return $self->_handle_legacy_request($request)
+  return await $self->_handle_legacy_request($request)
     if $self->_is_legacy_stdio_request( $request, $context );
 
   if ( defined $id ) {
@@ -581,14 +809,14 @@ sub handle {
     }
 
     if ( my $handler = $DISPATCH{$method} ) {
-      return $self->$handler( $request, $id );
+      return await $self->$handler( $request, $id, $context );
     }
 
     return _jsonrpc_error( -32601, "Method '$method' not found", $id );
   }
 
   # Notifications (no id): no-op. The stdio transport skips writing
-  # anything when handle() returns undef.
+  # anything when the response is undef.
   return undef;
 }
 
@@ -615,7 +843,7 @@ sub _request_protocol_version {
   return $meta->{'io.modelcontextprotocol/protocolVersion'};
 }
 
-sub _handle_legacy_request {
+async sub _handle_legacy_request {
   my ( $self, $request ) = @_;
 
   my $method = $request->{method};
@@ -646,27 +874,27 @@ sub _handle_legacy_request {
   }
 
   return $self->_legacy_jsonrpc_response( {}, $id ) if $method eq 'ping';
-  return $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
+  return await $self->_handle_legacy_tools_list($id) if $method eq 'tools/list';
   if ( $method eq 'tools/call' ) {
     my $params = $request->{params} // {};
     return _jsonrpc_error( -32602, 'Invalid params: params must be an object', $id )
       unless ref $params eq 'HASH';
-    return $self->_handle_legacy_tools_call( $params, $id );
+    return await $self->_handle_legacy_tools_call( $params, $id );
   }
 
   return _jsonrpc_error( -32601, "Method '$method' not found", $id );
 }
 
-sub _handle_legacy_tools_list {
+async sub _handle_legacy_tools_list {
   my ( $self, $id ) = @_;
 
   return $self->_legacy_jsonrpc_response(
-    { tools => $self->list_tools->get },
+    { tools => (await $self->list_tools) },
     $id,
   );
 }
 
-sub _handle_legacy_tools_call {
+async sub _handle_legacy_tools_call {
   my ( $self, $params, $id ) = @_;
 
   my $name = $params->{name}      // '';
@@ -686,7 +914,7 @@ sub _handle_legacy_tools_call {
 
   my $result;
   eval {
-    $result = $self->call_tool( $name, $args )->get;
+    $result = await $self->call_tool( $name, $args );
     1;
   } or do {
     return $self->_legacy_jsonrpc_response(
@@ -759,18 +987,17 @@ sub _legacy_jsonrpc_response {
   return { jsonrpc => '2.0', id => $id, result => $result };
 }
 
-=method handle($request)
+=method handle($request, $context)
 
 The JSON-RPC dispatch entry point. C<$request> is a single decoded
 JSON-RPC request or notification hashref (C<jsonrpc>, C<method>, and
 optionally C<id> and C<params>); transports are responsible for decoding
 wire JSON before calling this and for encoding whatever it returns.
 
-Despite dispatching to the C<async sub> methods C<discover>, C<list_tools>,
-C<call_tool>, C<list_resources>, C<read_resource>, C<list_prompts> and
-C<get_prompt>, C<handle> itself is synchronous: it calls C<-E<gt>get>
-on the C<Future> each of those returns and hands back a plain result,
-never a C<Future>.
+C<handle> is the synchronous convenience over L</handle_f>: it calls
+C<-E<gt>get> on the C<Future> C<handle_f> returns and hands back a plain
+result. It suits callers that do not run an event loop, and tests; a
+C<call_tool> that waits on I/O would block it. Transports use L</handle_f>.
 
 If C<$request> has a defined C<id> key (C<0> or C<''> counts; only an
 absent key or a JSON C<null> id does not), C<handle> returns a JSON-RPC
@@ -866,6 +1093,25 @@ L<Net::Async::MCP::Server::Transport::StreamableHTTP>, not by C<handle>.
 
 =cut
 
+=method handle_f($request, $context)
+
+The core of the dispatch: everything L</handle> says about C<$request> and
+what it returns holds here, except that the result is a L<Future> resolving to
+the response hashref (or C<undef> for a notification). It dispatches to the
+C<async sub> methods C<discover>, C<list_tools>, C<call_tool>,
+C<list_resources>, C<read_resource>, C<list_prompts> and C<get_prompt> and
+waits for them without blocking the loop. An exception those methods let
+escape (other than a tool, resource or prompt failing, which become results
+as described above) fails the Future.
+
+C<$context> is an optional hashref set by the transport. C<transport> names
+it (C<stdio> enables the C<legacy_compat> path). C<notify>, a code reference
+taking a complete notification hashref and returning a L<Future>, is where a
+request's own notifications go (the C<notifications/progress> of its
+C<tools/call>); without it they go to every sink, see L</emit_notification>.
+
+=cut
+
 sub _validate_request_meta {
   my ( $self, $request ) = @_;
   my $id     = $request->{id};
@@ -907,10 +1153,10 @@ sub _validate_request_meta {
   return undef;
 }
 
-sub _handle_discover {
+async sub _handle_discover {
   my ( $self, $id ) = @_;
 
-  my $result = $self->discover->get;
+  my $result = await $self->discover;
   return $self->_jsonrpc_response( $result, $id );
 }
 
@@ -942,10 +1188,10 @@ sub _paginate {
   return ( [ @{$items}[ $offset .. $last ] ], \%extra );
 }
 
-sub _handle_tools_list {
+async sub _handle_tools_list {
   my ( $self, $params, $id ) = @_;
 
-  my ( $tools, $extra ) = $self->_paginate( $self->list_tools->get, $params, $id );
+  my ( $tools, $extra ) = $self->_paginate( (await $self->list_tools), $params, $id );
   return $extra unless $tools;
   return $self->_jsonrpc_response(
     {
@@ -959,8 +1205,8 @@ sub _handle_tools_list {
   );
 }
 
-sub _handle_tools_call {
-  my ( $self, $params, $id ) = @_;
+async sub _handle_tools_call {
+  my ( $self, $params, $id, $context ) = @_;
 
   my $name = $params->{name}      // '';
   my $args = $params->{arguments} // {};
@@ -979,7 +1225,9 @@ sub _handle_tools_call {
 
   my $result;
   eval {
-    $result = $self->call_tool($name, $args)->get;
+    $result = await $self->call_tool(
+      $name, $args, $self->_tool_context( $params, $context ),
+    );
     1;
   } or do {
     # Tool execution error — wrap in isError content block so the model
@@ -1039,10 +1287,10 @@ sub _handle_tools_call {
   );
 }
 
-sub _handle_resources_list {
+async sub _handle_resources_list {
   my ( $self, $params, $id ) = @_;
 
-  my ( $resources, $extra ) = $self->_paginate( $self->list_resources->get, $params, $id );
+  my ( $resources, $extra ) = $self->_paginate( (await $self->list_resources), $params, $id );
   return $extra unless $resources;
   return $self->_jsonrpc_response(
     {
@@ -1054,7 +1302,7 @@ sub _handle_resources_list {
   );
 }
 
-sub _handle_resources_read {
+async sub _handle_resources_read {
   my ( $self, $params, $id ) = @_;
 
   my $uri = $params->{uri} // '';
@@ -1071,7 +1319,7 @@ sub _handle_resources_read {
 
   my $result;
   eval {
-    $result = $self->read_resource($uri)->get;
+    $result = await $self->read_resource($uri);
     1;
   } or do {
     # Resource execution error — a dying code ref or a registered-but-
@@ -1084,10 +1332,10 @@ sub _handle_resources_read {
   return $self->_jsonrpc_response( $result, $id );
 }
 
-sub _handle_prompts_list {
+async sub _handle_prompts_list {
   my ( $self, $params, $id ) = @_;
 
-  my ( $prompts, $extra ) = $self->_paginate( $self->list_prompts->get, $params, $id );
+  my ( $prompts, $extra ) = $self->_paginate( (await $self->list_prompts), $params, $id );
   return $extra unless $prompts;
   return $self->_jsonrpc_response(
     {
@@ -1099,7 +1347,7 @@ sub _handle_prompts_list {
   );
 }
 
-sub _handle_prompts_get {
+async sub _handle_prompts_get {
   my ( $self, $params, $id ) = @_;
 
   my $name = $params->{name}      // '';
@@ -1130,7 +1378,7 @@ sub _handle_prompts_get {
 
   my $result;
   eval {
-    $result = $self->get_prompt($name, $args)->get;
+    $result = await $self->get_prompt($name, $args);
     1;
   } or do {
     # Prompt execution error — a dying code ref or a registered-but-

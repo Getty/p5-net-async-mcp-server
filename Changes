@@ -2,6 +2,34 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - New handle_f() is the non-blocking core of the dispatch and returns a
+    Future; handle() stays as a thin synchronous wrapper around it for
+    callers without an event loop. The Stdio and StreamableHTTP transports
+    use handle_f(), so a tool that waits on I/O no longer holds up other
+    requests. A request still running when stdin closes is answered before
+    handle_requests returns. A tool, resource or prompt returning an
+    IO::Async future is now awaited like any other Future.
+
+  - The server can push notifications to the clients that are listening:
+    add_notification_sink() registers an open stream, emit_notification()
+    fans a notification out to the sinks, and the Stdio transport is such a
+    sink while it runs. Registering a tool, resource or prompt sends the
+    matching list_changed notification, and discover advertises listChanged.
+
+  - logging/setLevel and log() deliver notifications/message log records at
+    or above the chosen level; discover advertises the logging capability.
+
+  - A tools/call carrying _meta.progressToken gives the tool a progress
+    callback in the second argument of its code, delivered as
+    notifications/progress. call_tool() takes the context as an optional
+    third argument.
+
+  - StreamableHTTP: subscriptions/listen opens a long-lived SSE stream for
+    the server's notifications, and a tools/call asking for
+    text/event-stream streams its progress ahead of the response. Without
+    Accept: text/event-stream, subscriptions/listen is answered -32602
+    instead of the former -32601.
+
   - StreamableHTTP: new start() accepts connections through the IO::Async
     loop (Net::Async::HTTP::Server::PSGI serving to_app), so the HTTP server
     shares the loop with timers, the Stdio transport and other notifiers.

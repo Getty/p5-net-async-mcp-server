@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-10-25T02:45:20Z
+claimed_by: worker
+class: standard
+completed: 2026-10-25T02:45:20Z
+created: 2026-09-10T02:15:55Z
+id: 41
+priority: medium
+started: 2026-10-25T02:38:23Z
+status: done
+tags:
+- transport
+- async
+title: 'StreamableHTTP: nativer IO::Async::Listener bring-up, HTTP::Server::PSGI Accept-Loop
+  ersetzen'
+updated: 2026-10-25T02:45:20Z
+---
+
+Follow-up zu k17 - Wrapper zuerst. to_app ist jetzt der dokumentierte primaere async-freundliche Einstieg; listen ist ein duenner, bewusst blockierender Convenience-Wrapper, der die App unter HTTP::Server::PSGIs eigenem Accept-Loop laeuft und damit die IO::Async-Loop blockiert. Dieses Ticket ist der echte async bring-up: Accept durch die Event-Loop via IO::Async::Listener oder loop-listen, das in IO::Async::Stream-Verbindungen mit einem HTTP/1.1-Request-Parser akzeptiert, damit ein StreamableHTTP-Server die Loop mit anderen Notifiern teilt - Timer, Stdio-Transport, SSE-Streams. Scope und Entscheidungen: to_app als PSGI-Kontrakt behalten, also Plack::Test, reverse-proxy und third-party Hosts unveraendert; einen non-blocking Listener-Pfad ergaenzen als neue run/start-Methode oder listen redefinieren, und entscheiden ob listen ein blockierender Shim bleibt; SSE via _handle_sse_stream reitet aktuell auf dem PSGI-Streaming-Interface und braucht eigene streaming-write-Plumbing auf dem loop-nativen Pfad; braucht einen HTTP-Request-Parser fuer headers, body, chunked; Tests muessen den non-blocking Pfad ausueben ohne HTTP::Server::PSGI. Agent mcp-server-worker. Ref k17 Commit 1157ec2.
+
+2026-10-15 05:05 Nicht angefasst: Karte reserviert Scope-Entscheidungen (neue run/start-Methode vs listen redefinieren, bleibt listen blockierender Shim?) und verlangt eigenen HTTP/1.1-Parser inkl. chunked + SSE-Streaming-Plumbing — Design-Entscheidung des Maintainers, kein abwärtskompatibler Zwischenschritt genannt. Empfehlung: listen unverändert (blockierend, dokumentiert) lassen, neue start($loop,%opts)-Methode ergänzen; Parser ggf. aus Net::Async::HTTP::Server-Stack nicht neu schreiben (Abhängigkeit prüfen), nach k18-Entscheidung angehen.
+
+Umgesetzt in 70cc82e (offen-2610). Entscheidungen: listen() bleibt blockierender Shim; neue start(%opts) (Transport muss in einer Loop sein) liefert Future auf den Net::Async::HTTP::Server::PSGI-Listener, kein eigener Parser (Dependency geprueft, 0.15 installiert, cpanfile >= 0.15). SSE-Plumbing kommt vom PSGI-Streaming des Wrappers (chunked). Grenze: Request-Body braucht Content-Length (chunked Request nicht dekodiert, dokumentiert). t/08-http-listener.t ohne HTTP::Server::PSGI; gegen altes lib/ rot nur als Cant locate start (neue Methode).

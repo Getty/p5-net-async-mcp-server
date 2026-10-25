@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-10-25T02:54:52Z
+claimed_by: worker-k24
+class: standard
+completed: 2026-10-25T02:54:52Z
+created: 2026-09-01T05:01:04Z
+id: 24
+priority: medium
+started: 2026-10-25T02:38:12Z
+status: done
+tags:
+- deferred
+- architecture
+title: 'Deferred: server->client push channel (subscriptions delivery, logging, progress)'
+updated: 2026-10-25T02:54:58Z
+---
+
+Shared blocker behind real subscriptions/listen delivery (*ListChanged), logging/setLevel + notifications/message, and progress tokens (_meta progressToken + notifications/progress). handle() currently resolves async subs synchronously via ->get and there is no notification-emission path. Also gated on the non-blocking transport work (#17 HTTP listen, #18 Stdio write). Design a notifier-level emit_notification fan-out to open streams before building any of these.
+
+2026-10-15 05:05 Nicht angefasst: Karte verlangt ausdrücklich erst Design (emit_notification-Fan-out), Public-API/Architektur vorbehalten, hängt an k18 (offen, Entscheidung) und k41. Empfehlung: erst k18 und k41 entscheiden; dann Design-Notiz: Server hält Registry offener Streams (Stdio-Stream + SSE-Responses), emit_notification($method,$params) fan-out; handle() muss vorher ohne ->get auskommen (Future zurückgeben statt blockieren), sonst blockiert der Push-Pfad.
+
+Also found (offen-2610): Changes-Eintrag 0.003 nennt eine Karten-ID (k46) und der Worker-Brief nennt prove -l t/ statt prove -lr t/; nicht angefasst.
+
+Design-Notiz (offen-2610): (1) Server haelt Registry offener Sinks, emit_notification($method,$params) fan-out an alle Sinks (Stdio-Stream, SSE-Responses), Rueckgabe Future. (2) Voraussetzung: handle() darf nicht mehr per ->get blockieren; Rueckgabe wird ein Future (oder handle_async neben dem synchronen handle). (3) Reihenfolge: k18 (Stdio-Write ueber IO::Async::Stream) -> langlebiger SSE-Stream/GET-listen auf dem k41-start()-Pfad (k41 liegt nun in review; SSE ist heute ein Ein-Event-Stream) -> emit_notification -> logging/setLevel, progressToken, *ListChanged. Nicht gebaut: ohne offene Streams gaebe es keinen Verbraucher, ein Sink-Registry waere spekulativ.
+
+Commit 117f9b9 auf Branch k24. Entscheidungen: (1) subscriptions/listen = POST mit Accept text/event-stream (Spec-konform; GET bleibt 405, in t/03 festgehalten); ohne SSE-Accept -32602, ohne Transport-Stream (Stdio/handle) weiter -32601. (2) logging/setLevel server-weit (Protokoll zustandslos), Default info. (3) Progress geht an den eigenen Request-Stream (context->{notify}), sonst Fan-out; HTTP ohne SSE verwirft Progress. (4) Fix: ref eq 'Future' erkannte IO::Async::Future nicht, jetzt isa. (5) Fehlschlag von handle_f -> HTTP -32603 statt PSGI-Exception. Also found: mcp-server-worker.md und Skill mcp-server-core nennen handle() synchron/k24/k18/k41 als offene Luecken (veraltet, nicht angefasst); Changes 0.003 nennt k46; Brief nennt prove -l statt -lr.
+
+2026-10-25 02:54 Koordinator 2026-10-25: gemergt (117f9b9). subscriptions/listen als POST statt GET ist richtig: Repo zielt auf MCP 2026-07-28.

@@ -2,6 +2,12 @@ Revision history for Net-Async-MCP-Server
 
 {{$NEXT}}
 
+  - StreamableHTTP: new start() accepts connections through the IO::Async
+    loop (Net::Async::HTTP::Server::PSGI serving to_app), so the HTTP server
+    shares the loop with timers, the Stdio transport and other notifiers.
+    listen() stays the blocking convenience wrapper. Request bodies need a
+    Content-Length; responses, SSE included, are written chunked.
+
   - tools/list, resources/list and prompts/list can be paginated: the new
     page_size attribute caps the entries per page, a response with more left
     carries an opaque nextCursor, and params.cursor fetches the following

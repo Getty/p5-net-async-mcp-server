@@ -11,6 +11,9 @@ use MIME::Base64 qw( decode_base64 );
 use Encode      qw( decode FB_DEFAULT );
 use Scalar::Util qw( looks_like_number );
 use HTTP::Server::PSGI;
+use Net::Async::HTTP::Server::PSGI;
+use Future;
+use Carp qw( croak );
 
 our $VERSION = '0.004';
 
@@ -253,9 +256,8 @@ that server's own accept loop. That accept loop is an ordinary blocking one,
 so C<listen> blocks both the caller and the L<IO::Async> loop — unlike
 L<Net::Async::MCP::Server::Transport::Stdio/handle_requests>, which reads
 through the loop and leaves other notifiers running, nothing else in this loop
-gets a turn while C<listen> is up. To share the loop, run L</to_app> under an
-async-capable PSGI server instead; a native L<IO::Async::Listener> bring-up is
-left to a future ticket.
+gets a turn while C<listen> is up. To share the loop, use L</start>, or run
+L</to_app> under an async-capable PSGI server.
 
 A non-loopback bind is warned about, since exposing an MCP server on a public
 interface is almost always accidental and unauthenticated; pass
@@ -267,7 +269,70 @@ sub listen {
   my ( $self, %opts ) = @_;
   my $host = $self->{host};
 
-  # Refuse to silently expose the server on a public interface.
+  $self->_warn_external_bind(%opts);
+
+  my $server = HTTP::Server::PSGI->new(
+    host => $host,
+    port => $self->{port},
+  );
+  $server->run( $self->to_app );
+  return $server;
+}
+
+=method start
+
+    $loop->add($http);
+    my $listener = $http->start->get;
+    say 'listening on port ', $listener->read_handle->sockport;
+
+The non-blocking counterpart of L</listen>: binds the configured C<host:port>
+and accepts through the L<IO::Async> loop the transport has been added to, with
+L<Net::Async::HTTP::Server::PSGI> serving L</to_app>. Nothing blocks, so the
+HTTP server shares the loop with timers, the Stdio transport and other
+notifiers. Returns a L<Future> that resolves to the listener once it is bound;
+a C<port> of C<0> binds an ephemeral port, readable from the listener's
+C<read_handle>. The listener is a child notifier of the transport, so removing
+the transport from its loop stops the server. Calling C<start> a second time
+croaks.
+
+The transport must be in a loop first. Takes the same C<allow_external_bind>
+option as L</listen>.
+
+A request body must carry a C<Content-Length>; the HTTP parser underneath does
+not decode a chunked request body, and such a request is answered with the
+usual JSON-RPC parse error. Responses, the SSE stream included, are written
+chunked as the PSGI streaming interface asks.
+
+=cut
+
+sub start {
+  my ( $self, %opts ) = @_;
+  my $loop = $self->loop
+    or croak 'StreamableHTTP: add the transport to a loop before start';
+  croak 'StreamableHTTP: already started' if $self->{listener};
+
+  $self->_warn_external_bind(%opts);
+
+  my $listener = Net::Async::HTTP::Server::PSGI->new( app => $self->to_app );
+  $self->add_child($listener);
+  $self->{listener} = $listener;
+
+  my $f = $listener->listen(
+    addr => {
+      family   => ( $self->{host} =~ /:/ ? 'inet6' : 'inet' ),
+      socktype => 'stream',
+      ip       => $self->{host},
+      port     => $self->{port},
+    },
+  );
+  return $f->then( sub { Future->done($listener) } );
+}
+
+# Refuse to silently expose the server on a public interface.
+sub _warn_external_bind {
+  my ( $self, %opts ) = @_;
+  my $host = $self->{host};
+
   unless ( $opts{allow_external_bind}
     || $host eq '127.0.0.1'
     || $host eq '::1'
@@ -277,13 +342,6 @@ sub listen {
       . "this is non-loopback. Set 'host' to 127.0.0.1 or pass "
       . "allow_external_bind to acknowledge.\n";
   }
-
-  my $server = HTTP::Server::PSGI->new(
-    host => $host,
-    port => $self->{port},
-  );
-  $server->run( $self->to_app );
-  return $server;
 }
 
 # --- The PSGI dispatch path ----------------------------------------------

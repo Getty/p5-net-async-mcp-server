@@ -483,7 +483,11 @@ any PSGI server, including an async-capable one on the same loop, or behind a
 reverse proxy — and it is what `Plack::Test` drives in the test suite.
 `$http->listen` is a convenience wrapper that runs that app under
 `HTTP::Server::PSGI`'s own blocking accept loop for a quick local bring-up; it
-blocks the event loop, so a native async listener is left to a future ticket.
+blocks the event loop. `$http->start` is the non-blocking alternative: with the
+transport added to a loop, it accepts through that loop
+(`Net::Async::HTTP::Server::PSGI`) and returns a Future of the listener, so the
+server shares the loop with timers and other notifiers. Request bodies need a
+`Content-Length` there.
 See
 [Net::Async::MCP::Server::Transport::StreamableHTTP](https://metacpan.org/pod/Net::Async::MCP::Server::Transport::StreamableHTTP)
 for the full list of options.

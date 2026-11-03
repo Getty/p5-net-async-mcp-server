@@ -340,7 +340,7 @@ tool implementations. C<$context> is optional; it is handed to a registered
 tool's C<code> reference as its second argument, after C<$arguments>, and is
 a hashref whose C<progress> entry is a code reference
 C<< ->( $progress, $total, $message ) >> that reports progress for this call
-(see L</emit_notification>); C<$total> and C<$message> are optional. It returns a
+(see L<emit_notification|/emit_notification($method, $params)>); C<$total> and C<$message> are optional. It returns a
 L<Future>, and is a no-op that resolves immediately when the client did not
 send a C<progressToken>, so a tool may call it unconditionally. Returns a Future that resolves to the tool's return
 value, which the dispatch layer then wraps:
@@ -579,7 +579,7 @@ sub add_notification_sink {
 =method add_notification_sink($sink, %opts)
 
 Registers C<$sink> to receive server-initiated notifications and returns a
-token for L</remove_notification_sink>. A transport that holds a stream open
+token for L<remove_notification_sink|/remove_notification_sink($token)>. A transport that holds a stream open
 to the client registers one for as long as the stream lives. C<$sink> is
 called with the complete JSON-RPC notification hashref (C<jsonrpc>,
 C<method>, C<params>) and may return a L<Future> that resolves once the
@@ -666,7 +666,7 @@ sub notify_list_changed {
 Tells the clients that the C<tools>, C<resources> or C<prompts> list changed,
 with C<notifications/tools/list_changed> and its siblings. The C<register_*>
 methods call it themselves, so a tool registered while a client is listening
-reaches that client. Returns a L<Future> like L</emit_notification>.
+reaches that client. Returns a L<Future> like L<emit_notification|/emit_notification($method, $params)>.
 
 =cut
 
@@ -677,7 +677,7 @@ sub log_level {
 
 =method log_level
 
-The lowest severity L</log> delivers, C<info> until a client changes it with
+The lowest severity L<log|/log($level, $data, $logger)> delivers, C<info> until a client changes it with
 C<logging/setLevel>. The level belongs to the server, not to a client: the
 2026-07-28 protocol keeps no per-client state between requests.
 
@@ -701,7 +701,7 @@ Sends a C<notifications/message> log record to the listening clients, if
 C<$level> (one of C<debug>, C<info>, C<notice>, C<warning>, C<error>,
 C<critical>, C<alert>, C<emergency>) is at or above L</log_level>.
 C<$data> is any JSON-serialisable value, C<$logger> an optional name.
-Returns a L<Future> like L</emit_notification>.
+Returns a L<Future> like L<emit_notification|/emit_notification($method, $params)>.
 
 =cut
 
@@ -994,10 +994,10 @@ JSON-RPC request or notification hashref (C<jsonrpc>, C<method>, and
 optionally C<id> and C<params>); transports are responsible for decoding
 wire JSON before calling this and for encoding whatever it returns.
 
-C<handle> is the synchronous convenience over L</handle_f>: it calls
+C<handle> is the synchronous convenience over L<handle_f|/handle_f($request, $context)>: it calls
 C<-E<gt>get> on the C<Future> C<handle_f> returns and hands back a plain
 result. It suits callers that do not run an event loop, and tests; a
-C<call_tool> that waits on I/O would block it. Transports use L</handle_f>.
+C<call_tool> that waits on I/O would block it. Transports use L<handle_f|/handle_f($request, $context)>.
 
 If C<$request> has a defined C<id> key (C<0> or C<''> counts; only an
 absent key or a JSON C<null> id does not), C<handle> returns a JSON-RPC
@@ -1095,7 +1095,7 @@ L<Net::Async::MCP::Server::Transport::StreamableHTTP>, not by C<handle>.
 
 =method handle_f($request, $context)
 
-The core of the dispatch: everything L</handle> says about C<$request> and
+The core of the dispatch: everything L<handle|/handle($request, $context)> says about C<$request> and
 what it returns holds here, except that the result is a L<Future> resolving to
 the response hashref (or C<undef> for a notification). It dispatches to the
 C<async sub> methods C<discover>, C<list_tools>, C<call_tool>,
@@ -1108,7 +1108,7 @@ C<$context> is an optional hashref set by the transport. C<transport> names
 it (C<stdio> enables the C<legacy_compat> path). C<notify>, a code reference
 taking a complete notification hashref and returning a L<Future>, is where a
 request's own notifications go (the C<notifications/progress> of its
-C<tools/call>); without it they go to every sink, see L</emit_notification>.
+C<tools/call>); without it they go to every sink, see L<emit_notification|/emit_notification($method, $params)>.
 
 =cut
 

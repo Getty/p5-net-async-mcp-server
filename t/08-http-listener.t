@@ -139,7 +139,11 @@ subtest 'header parity check still applies' => sub {
     like( $raw, qr{-32020}, 'HeaderMismatch' );
 };
 
-ok( $ticks >= 1, "timer ticked while serving ($ticks ticks)" );
+# The requests above can finish within one interval, so the loop runs on with
+# the listener still attached until the timer ticks, for at most five seconds.
+my $deadline = time + 5;
+$loop->loop_once(0.05) while !$ticks && time < $deadline;
+ok( $ticks >= 1, "timer ticks on the loop that serves the listener ($ticks ticks)" );
 $timer->stop;
 
 $loop->remove($http);

@@ -84,8 +84,9 @@ hazards are in `.claude/rules/mcp-server-rules.md`.
 | Commits, `Changes`, card → done, pre-release audit | `mcp-server-release-manager` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
-agent delegates rather than loading them. Skill sources live under `.claude/skills/`,
-hardlink-shared with the other Perl repos.
+agent delegates rather than loading them. Skill sources live under `.claude/skills/`:
+`mcp-server-core` is owned here, the shared ones are installed by skilletor from
+`.claude/skilletor.json`.
 
 Known gaps in the current implementation — flag before "fixing" — are listed in
 `.claude/agents/mcp-server-worker.md`.

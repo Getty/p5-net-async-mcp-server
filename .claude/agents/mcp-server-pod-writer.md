@@ -3,12 +3,11 @@ name: mcp-server-pod-writer
 description: "Write and maintain Net::Async::MCP::Server POD in the [@Author::GETTY] PodWeaver house format — inline =method/=attr/=seealso, no manual NAME/VERSION/AUTHOR sections — and keep the hand-maintained README.md in step. Use for documenting new API surface and polishing existing POD; never changes code behavior."
 model: sonnet
 disallowedTools: Write, NotebookEdit, Bash
-briefing:
-  skills:
-    - getty-perl-core
-    - perl-mcp
-    - getty-perl-pod
-    - mcp-server-core
+skills:
+  - getty-perl-core
+  - perl-mcp
+  - getty-perl-pod
+  - mcp-server-core
 ---
 
 You are the mcp-server-pod-writer for **Net::Async::MCP::Server**.

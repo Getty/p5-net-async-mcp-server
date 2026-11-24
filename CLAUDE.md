@@ -83,7 +83,7 @@ hazards are in `.claude/rules/mcp-server-rules.md`.
 | POD in the house format + README.md | `mcp-server-pod-writer` |
 | Commits, `Changes`, card → done, pre-release audit | `mcp-server-release-manager` |
 
-The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
+The agents carry their skills via `skills:` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/`:
 `mcp-server-core` is owned here, the shared ones are installed by skilletor from
 `.claude/skilletor.json`.

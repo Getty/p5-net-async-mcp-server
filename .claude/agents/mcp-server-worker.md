@@ -2,14 +2,13 @@
 name: mcp-server-worker
 description: "Default Net::Async::MCP::Server worker — implement, refactor, debug, and test code in this distribution. Pre-loaded with Perl house rules, IO::Async/Future patterns, MCP protocol knowledge and the [@Author::GETTY] release conventions. Use for any behavior-relevant change: the JSON-RPC dispatch in handle(), the tool registry, initialize/capability negotiation, the Stdio transport, error and Future semantics. Leaves a commit-ready tree; never commits — commits belong to mcp-server-release-manager."
 model: inherit
-briefing:
-  skills:
-    - getty-perl-core
-    - perl-mcp
-    - perl-io-async-future
-    - kanban-issues-karr-ticket
-    - getty-perl-pod
-    - mcp-server-core
+skills:
+  - getty-perl-core
+  - perl-mcp
+  - perl-io-async-future
+  - kanban-issues-karr-ticket
+  - getty-perl-pod
+  - mcp-server-core
 ---
 
 You are the mcp-server-worker for **Net::Async::MCP::Server**, an async MCP (Model

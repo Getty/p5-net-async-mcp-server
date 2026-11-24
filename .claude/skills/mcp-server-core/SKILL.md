@@ -22,8 +22,8 @@ loading, cpanfile pinning and house style in `getty-perl-core`; `Future`/
 Four roles: `mcp-server-worker` (implement, refactor, debug),
 `mcp-server-test-writer` (tests), `mcp-server-pod-writer` (POD + `README.md`),
 `mcp-server-release-manager` (commit, `Changes`, card → done, pre-release
-audit). All four get their skills force-loaded via `briefing.skills`. The
-orchestrating main agent gets **no briefing** — it coordinates, inspects, plans,
+audit). All four get their skills force-loaded via `skills:`. The
+orchestrating main agent gets **no preloaded skills** — it coordinates, inspects, plans,
 reviews diffs, runs tests and edits non-behavioral docs, and delegates
 anything behavior-relevant. Reason: only the briefed agents see the
 protocol invariants and the known gaps below in context; an unbriefed hand
